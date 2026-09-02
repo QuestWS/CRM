@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.db
+*.sqlite3
+data/
+media/
+recordings/
+.pytest_cache/
+.credentials/
+token_*.json
+client_secret*.json
+models/
+.DS_Store
+
+# packaging build artifacts
+*.egg-info/
+build/
+dist/

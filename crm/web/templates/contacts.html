@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}People{% endblock %}
+{% block content %}
+<h1>People {% if q %}<span class="muted">matching "{{ q }}"</span>{% endif %}</h1>
+<table class="grid">
+  <thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>Last contact</th></tr></thead>
+  <tbody>
+  {% for c in contacts %}
+    <tr>
+      <td><a href="/contacts/{{ c.id }}">{{ c.display_name }}</a></td>
+      <td>{{ c.company or '' }}</td>
+      <td>{{ c.primary_phone | phone }}</td>
+      <td>{{ c.primary_email or '' }}</td>
+      <td>{% if c.last_contacted_at %}{{ c.last_contacted_at.strftime('%d %b %Y') }}{% else %}<span class="muted">never</span>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No contacts yet. They appear automatically as calls and emails come in.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

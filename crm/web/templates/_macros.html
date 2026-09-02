@@ -1,0 +1,26 @@
+{% macro contact_link(contact) %}
+  {% if contact %}<a href="/contacts/{{ contact.id }}">{{ contact.display_name }}</a>
+  {% else %}<span class="muted">unknown</span>{% endif %}
+{% endmacro %}
+
+{% macro when(value, now=None) %}
+  {% if value %}<time datetime="{{ value.isoformat() }}">{{ value.strftime('%a %d %b, %H:%M') }}</time>
+  {% else %}<span class="muted">&mdash;</span>{% endif %}
+{% endmacro %}
+
+{% macro task_row(task, contact=None) %}
+<li class="task {{ 'overdue' if task.due_at and task.due_at < now else '' }}">
+  <form method="post" action="/tasks/{{ task.id }}/done" class="inline">
+    <button type="submit" class="check" title="Mark done">&#10003;</button>
+  </form>
+  <div>
+    <div class="task-title">{{ task.title }}</div>
+    <div class="meta">
+      {% if task.contact %}<a href="/contacts/{{ task.contact.id }}">{{ task.contact.display_name }}</a> &middot; {% endif %}
+      {% if task.due_at %}due {{ task.due_at.strftime('%a %d %b') }}{% else %}no due date{% endif %}
+      {% if task.priority != 'normal' %} &middot; <span class="pill p-{{ task.priority }}">{{ task.priority }}</span>{% endif %}
+    </div>
+    {% if task.detail %}<div class="detail">{{ task.detail }}</div>{% endif %}
+  </div>
+</li>
+{% endmacro %}

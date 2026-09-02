@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% from "_macros.html" import task_row %}
+{% block title %}{{ contact.display_name }}{% endblock %}
+{% block content %}
+
+<div class="contact-head">
+  <div>
+    <h1>{{ contact.display_name }}</h1>
+    <div class="meta">
+      {% if contact.title %}{{ contact.title }}{% if contact.company %}, {% endif %}{% endif %}
+      {% if contact.company %}{{ contact.company }}{% endif %}
+    </div>
+    <div class="meta">
+      {% for p in contact.phones %}<span class="chip">{{ p.e164 | phone }}</span>{% endfor %}
+      {% for e in contact.emails %}<span class="chip">{{ e.address }}</span>{% endfor %}
+    </div>
+  </div>
+  <form method="post" action="/contacts/{{ contact.id }}/refresh-profile">
+    <button type="submit">Rewrite profile</button>
+  </form>
+</div>
+
+<section class="profile">
+  <h2>Who they are</h2>
+  {% if contact.ai_profile %}
+    <div class="prose">{{ contact.ai_profile }}</div>
+    <div class="meta">Updated {{ contact.ai_profile_updated_at.strftime('%d %b %Y %H:%M') if contact.ai_profile_updated_at }}</div>
+  {% else %}
+    <p class="muted">No profile yet &mdash; it is written after the first conversation is analysed.</p>
+  {% endif %}
+</section>
+
+<div class="cols">
+  <section>
+    <h2>What they need</h2>
+    {% if needs %}
+    <ul class="needs">
+      {% for n in needs %}
+      <li class="need s-{{ n.status.value }}">
+        <div class="need-head">
+          <strong>{{ n.title }}</strong>
+          <span class="pill p-{{ n.urgency or 'normal' }}">{{ n.urgency or 'normal' }}</span>
+          <span class="pill">{{ n.status.value.replace('_',' ') }}</span>
+        </div>
+        {% if n.description %}<div class="detail">{{ n.description }}</div>{% endif %}
+        {% if n.blockers %}<div class="detail blocked">Blocked: {{ n.blockers }}</div>{% endif %}
+        {% if n.value_estimate %}<div class="meta">Value: {{ n.value_estimate }}</div>{% endif %}
+        <form method="post" action="/needs/{{ n.id }}/status" class="inline">
+          <select name="status">
+            {% for opt in ['open','in_progress','resolved','lost'] %}
+            <option value="{{ opt }}" {{ 'selected' if n.status.value == opt }}>{{ opt.replace('_',' ') }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Update</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">Nothing recorded yet.</p>{% endif %}
+
+    <h2>Open tasks</h2>
+    {% if tasks %}<ul class="tasks">{% for t in tasks %}{{ task_row(t) }}{% endfor %}</ul>
+    {% else %}<p class="muted">None.</p>{% endif %}
+
+    {% if appointments %}
+    <h2>Appointments</h2>
+    <ul class="appts">
+      {% for a in appointments %}
+      <li>
+        <span class="date">{{ a.starts_at.strftime('%a %d %b %H:%M') }}</span> {{ a.title }}
+        {% if a.sync_state == 'synced' %}<span class="pill">on calendar</span>
+        {% else %}
+        <form method="post" action="/appointments/{{ a.id }}/sync" class="inline">
+          <button type="submit">Add to calendar</button>
+        </form>
+        {% endif %}
+        {% if a.sync_error %}<div class="detail blocked">{{ a.sync_error }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>What they've told you</h2>
+    {% if facts_by_category %}
+      {% for category, facts in facts_by_category.items() %}
+      <h3 class="cat">{{ category }}</h3>
+      <ul class="facts">
+        {% for f in facts %}
+        <li class="{{ 'low' if f.confidence < 0.5 }}">
+          {{ f.text }}
+          {% if f.quote %}<div class="quote">&ldquo;{{ f.quote }}&rdquo;</div>{% endif %}
+          <div class="meta">
+            {{ f.last_confirmed_at.strftime('%d %b %Y') }}
+            {% if f.confidence < 0.5 %} &middot; low confidence{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endfor %}
+    {% else %}<p class="muted">Nothing yet.</p>{% endif %}
+  </section>
+</div>
+
+<section>
+  <h2>History</h2>
+  <form method="post" action="/contacts/{{ contact.id }}/note" class="note-form">
+    <textarea name="body" rows="3" placeholder="Add a note&hellip;" required></textarea>
+    <button type="submit">Save note</button>
+  </form>
+  <ul class="timeline">
+    {% for i in interactions %}
+    <li>
+      <div class="tl-head">
+        <span class="kind k-{{ i.kind.value }}">{{ i.kind.value }}</span>
+        <span class="dir">{{ i.direction.value }}</span>
+        <span class="muted">{{ i.occurred_at.strftime('%a %d %b %Y, %H:%M') }}</span>
+        {% if i.duration_seconds %}<span class="muted">{{ (i.duration_seconds // 60) }}m {{ i.duration_seconds % 60 }}s</span>{% endif %}
+        {% if i.sentiment and i.sentiment != 'neutral' %}<span class="pill p-{{ i.sentiment }}">{{ i.sentiment }}</span>{% endif %}
+      </div>
+      {% if i.subject %}<div class="subject">{{ i.subject }}</div>{% endif %}
+      {% if i.summary %}<div class="prose">{{ i.summary }}</div>{% endif %}
+      {% if i.outcome %}<div class="detail"><strong>Where it stands:</strong> {{ i.outcome }}</div>{% endif %}
+      {% if i.body %}
+      <details><summary>{{ 'Transcript' if i.kind.value == 'call' else 'Full text' }}</summary>
+        <pre class="transcript">{{ i.body }}</pre>
+      </details>
+      {% endif %}
+    </li>
+    {% else %}
+    <li class="muted">Nothing yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

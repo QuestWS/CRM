@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Call{% endblock %}
+{% block content %}
+<h1>Call {{ (recording.call_started_at or recording.received_at).strftime('%a %d %b %Y, %H:%M') }}</h1>
+<div class="meta">
+  {{ recording.direction.value }} &middot;
+  {{ recording.from_number | phone }} &rarr; {{ recording.to_number | phone }}
+  {% if recording.duration_seconds %} &middot; {{ (recording.duration_seconds // 60)|int }}m {{ (recording.duration_seconds % 60)|int }}s{% endif %}
+  {% if contact %} &middot; <a href="/contacts/{{ contact.id }}">{{ contact.display_name }}</a>{% endif %}
+</div>
+
+<div class="meta">
+  <span class="pill p-{{ recording.status.value }}">{{ recording.status.value }}</span>
+  {% if recording.transcript_engine %}<span class="pill">{{ recording.transcript_engine }}</span>{% endif %}
+  {% if recording.consent_announced %}<span class="pill">recording announcement confirmed</span>
+  {% else %}<span class="pill p-warn">announcement not confirmed by the PBX</span>{% endif %}
+</div>
+
+{% if recording.error %}<div class="banner bad">{{ recording.error }}</div>{% endif %}
+
+{% if interaction and interaction.summary %}
+<section><h2>Summary</h2><div class="prose">{{ interaction.summary }}</div>
+  {% if interaction.outcome %}<p><strong>Where it stands:</strong> {{ interaction.outcome }}</p>{% endif %}
+</section>
+{% endif %}
+
+<section>
+  <h2>Transcript</h2>
+  {% if recording.transcript %}<pre class="transcript">{{ recording.transcript }}</pre>
+  {% else %}<p class="muted">Not transcribed yet.</p>{% endif %}
+</section>
+{% endblock %}

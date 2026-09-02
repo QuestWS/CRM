@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-crm"
+version = "0.1.0"
+description = "AI CRM: records and transcribes calls, reads email over IMAP, remembers people"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.scripts]
+crm = "crm.cli:main"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["crm*"]
+
+[tool.setuptools.package-data]
+crm = ["web/templates/*.html", "web/static/*.css"]
+
+[tool.ruff]
+line-length = 95
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]  # FastAPI's Depends()/Form() defaults are the framework's idiom
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:crm.*"]

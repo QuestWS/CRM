@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Calls{% endblock %}
+{% block content %}
+<h1>Calls</h1>
+
+<form class="upload" method="post" action="/upload" enctype="multipart/form-data">
+  <label>Add a recording <input type="file" name="file" accept="audio/*" required></label>
+  <input type="text" name="from_number" placeholder="From (optional)">
+  <input type="text" name="to_number" placeholder="To (optional)">
+  <button type="submit">Upload &amp; process</button>
+</form>
+
+<table class="grid">
+  <thead><tr><th>When</th><th>Direction</th><th>From</th><th>To</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for r in recordings %}
+    <tr class="{{ 'bad' if r.status.value == 'failed' }}">
+      <td>{{ (r.call_started_at or r.received_at).strftime('%d %b %H:%M') }}</td>
+      <td>{{ r.direction.value }}</td>
+      <td>{{ r.from_number | phone }}</td>
+      <td>{{ r.to_number | phone }}</td>
+      <td><span class="pill p-{{ r.status.value }}">{{ r.status.value }}</span>
+          {% if not r.consent_announced %}<span class="pill p-warn" title="The PBX did not confirm the recording announcement played">no consent flag</span>{% endif %}</td>
+      <td><a href="/calls/{{ r.id }}">open</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">No recordings yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

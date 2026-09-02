@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_macros.html" import task_row %}
+{% block title %}Tasks{% endblock %}
+{% block content %}
+<h1>Tasks</h1>
+<form class="inline-form" method="post" action="/tasks">
+  <input type="text" name="title" placeholder="Add a task&hellip;" required>
+  <input type="datetime-local" name="due_at">
+  <button type="submit">Add</button>
+</form>
+
+{% if overdue %}
+<h2 class="bad">Overdue</h2>
+<ul class="tasks">{% for t in overdue %}{{ task_row(t) }}{% endfor %}</ul>
+{% endif %}
+
+<h2>Open</h2>
+{% if tasks %}<ul class="tasks">{% for t in tasks %}{{ task_row(t) }}{% endfor %}</ul>
+{% else %}<p class="muted">Nothing outstanding.</p>{% endif %}
+{% endblock %}

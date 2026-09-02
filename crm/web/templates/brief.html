@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Brief{% endblock %}
+{% block content %}
+<h1>Today's brief</h1>
+{% if brief %}
+  <p class="headline">{{ brief.headline }}</p>
+  <h2>Do these</h2>
+  <ol class="priorities">{% for p in brief.priorities %}<li>{{ p }}</li>{% endfor %}</ol>
+  {% if brief.waiting_on_others %}
+  <h2>Waiting on others</h2>
+  <ul>{% for w in brief.waiting_on_others %}<li>{{ w }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if brief.at_risk %}
+  <h2 class="bad">At risk</h2>
+  <ul>{% for r in brief.at_risk %}<li>{{ r }}</li>{% endfor %}</ul>
+  {% endif %}
+{% else %}
+  <p class="muted">No brief available. Check that ANTHROPIC_API_KEY is set &mdash; run
+  <code>python -m crm.cli doctor</code>.</p>
+{% endif %}
+{% endblock %}

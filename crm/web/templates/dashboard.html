@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_macros.html" import contact_link, when, task_row %}
+{% block title %}Today{% endblock %}
+{% block content %}
+
+{% if counts.recordings_failed or counts.recordings_queued or counts.emails_unanalysed %}
+<div class="banner">
+  {% if counts.recordings_queued %}{{ counts.recordings_queued }} recording(s) waiting to process. {% endif %}
+  {% if counts.recordings_failed %}<strong>{{ counts.recordings_failed }} failed</strong> &mdash; <a href="/calls">see calls</a>. {% endif %}
+  {% if counts.emails_unanalysed %}{{ counts.emails_unanalysed }} email(s) not yet analysed.{% endif %}
+</div>
+{% endif %}
+
+<div class="stats">
+  <div class="stat"><span class="n">{{ contact_count }}</span> people</div>
+  <div class="stat"><span class="n">{{ open_needs }}</span> open needs</div>
+  <div class="stat {{ 'bad' if overdue else '' }}"><span class="n">{{ overdue|length }}</span> overdue</div>
+</div>
+
+<div class="cols">
+  <section>
+    <h2>Next up</h2>
+    {% if appointments %}
+    <ul class="appts">
+      {% for a in appointments %}
+      <li>
+        <span class="date">{{ a.starts_at.strftime('%a %d %b %H:%M') }}</span>
+        <strong>{{ a.title }}</strong>
+        {% if a.location %}<span class="muted">&middot; {{ a.location }}</span>{% endif %}
+        {% if a.sync_state != 'synced' %}<span class="pill p-warn">not on calendar</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">Nothing scheduled in the next week.</p>{% endif %}
+
+    <h2>Open tasks</h2>
+    {% if tasks %}
+    <ul class="tasks">{% for t in tasks %}{{ task_row(t) }}{% endfor %}</ul>
+    {% else %}<p class="muted">Nothing outstanding.</p>{% endif %}
+  </section>
+
+  <section>
+    <h2>Recent conversations</h2>
+    <ul class="feed">
+      {% for i in recent %}
+      <li>
+        <span class="kind k-{{ i.kind.value }}">{{ i.kind.value }}</span>
+        {{ contact_link(i.contact) }}
+        <span class="muted">{{ i.occurred_at.strftime('%d %b %H:%M') }}</span>
+        <div class="detail">{{ i.summary or i.subject or '' }}</div>
+      </li>
+      {% else %}
+      <li class="muted">No conversations recorded yet.</li>
+      {% endfor %}
+    </ul>
+
+    {% if cold %}
+    <h2>Going cold</h2>
+    <ul class="feed">
+      {% for c in cold %}
+      <li>{{ contact_link(c) }}
+        <span class="muted">
+          last contact
+          {% if c.last_contacted_at %}{{ (now - c.last_contacted_at).days }} days ago{% else %}never{% endif %}
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

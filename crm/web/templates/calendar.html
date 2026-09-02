@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Calendar{% endblock %}
+{% block content %}
+<h1>Appointments</h1>
+<ul class="appts big">
+  {% for a in appointments %}
+  <li>
+    <span class="date">{{ a.starts_at.strftime('%a %d %b, %H:%M') }}</span>
+    <strong>{{ a.title }}</strong>
+    {% if a.contact_id %}<a href="/contacts/{{ a.contact_id }}">contact</a>{% endif %}
+    {% if a.location %}<div class="meta">{{ a.location }}</div>{% endif %}
+    {% if a.description %}<div class="detail">{{ a.description }}</div>{% endif %}
+    {% if a.sync_state == 'synced' %}<span class="pill">on Google Calendar</span>
+    {% else %}
+      <form method="post" action="/appointments/{{ a.id }}/sync" class="inline">
+        <button type="submit">Add to calendar</button>
+      </form>
+    {% endif %}
+    {% if a.sync_error %}<div class="detail blocked">{{ a.sync_error }}</div>{% endif %}
+  </li>
+  {% else %}
+  <li class="muted">Nothing scheduled. Appointments appear here when a call or email settles on a date and time.</li>
+  {% endfor %}
+</ul>
+{% endblock %}
