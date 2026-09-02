@@ -71,8 +71,10 @@ def make_interaction(session, contact, kind=InteractionKind.call):
     return i
 
 
-def analysis_with(*updates) -> ConversationAnalysis:
+def analysis_with(*updates, category="service") -> ConversationAnalysis:
     return ConversationAnalysis(
+        category=category,
+        category_confidence=0.9,
         summary="s", outcome="o",
         person=ExtractedPerson(name_confidence=0.9),
         ticket_updates=list(updates),

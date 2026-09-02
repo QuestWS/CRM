@@ -5,7 +5,9 @@
 
 <div class="contact-head">
   <div>
-    <h1>{{ contact.display_name }}</h1>
+    <h1>{{ contact.display_name }}
+      {% if contact.kind.value != 'customer' %}<span class="pill">{{ contact.kind.value }}</span>{% endif %}
+    </h1>
     <div class="meta">
       {% if contact.title %}{{ contact.title }}{% if contact.company %}, {% endif %}{% endif %}
       {% if contact.company %}{{ contact.company }}{% endif %}
@@ -115,6 +117,10 @@
       <div class="tl-head">
         <span class="kind k-{{ i.kind.value }}">{{ i.kind.value }}</span>
         <span class="dir">{{ i.direction.value }}</span>
+        {% if i.category %}<span class="pill cat">{{ i.category.value.replace('_', ' ') }}</span>{% endif %}
+        {% if i.product_line and i.product_line.value != 'none' %}
+          <span class="pill">{{ i.product_line.value }}</span>{% endif %}
+        {% if i.ticket_id %}<span class="pill">WO {{ i.ticket_id }}</span>{% endif %}
         <span class="muted">{{ i.occurred_at.strftime('%a %d %b %Y, %H:%M') }}</span>
         {% if i.duration_seconds %}<span class="muted">{{ (i.duration_seconds // 60) }}m {{ i.duration_seconds % 60 }}s</span>{% endif %}
         {% if i.sentiment and i.sentiment != 'neutral' %}<span class="pill p-{{ i.sentiment }}">{{ i.sentiment }}</span>{% endif %}

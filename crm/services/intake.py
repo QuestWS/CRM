@@ -20,6 +20,7 @@ from crm.ai import enrich
 from crm.ai.client import AIUnavailable
 from crm.ai.enrich import TranscriptTooLong
 from crm.models import (
+    CallCategory,
     Direction,
     IntakeStatus,
     Interaction,
@@ -161,6 +162,8 @@ def _apply(
             body=intake.transcript,
             summary=extraction.work_requested,
             outcome="Drafted at the counter; not yet written up in BiT.",
+            category=CallCategory.service,
+            category_confidence=1.0,
             source="walk_in",
             source_ref=recording.sha256,
             meta={"intake_id": intake.id, "recording_id": recording.id},

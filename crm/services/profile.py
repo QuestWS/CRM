@@ -15,13 +15,17 @@ from crm.ai.client import AIUnavailable
 from crm.ai.schemas import ConversationAnalysis
 from crm.config import settings
 from crm.models import (
+    NO_PROFILE_CATEGORIES,
     Appointment,
+    CallCategory,
     Contact,
+    ContactKind,
     Fact,
     FactCategory,
     Interaction,
     Need,
     NeedStatus,
+    ProductLine,
     Task,
     TaskStatus,
     to_naive_utc,
@@ -88,6 +92,14 @@ def apply_analysis(
     interaction.summary = analysis.summary
     interaction.outcome = analysis.outcome
     interaction.sentiment = analysis.sentiment
+    _apply_routing(s, contact, interaction, analysis)
+
+    # A robocall or a colleague's question is not somebody to build a profile
+    # of. Record what it was and stop.
+    if interaction.category in NO_PROFILE_CATEGORIES:
+        interaction.processed = True
+        s.flush()
+        return counts
 
     _apply_person(s, contact, analysis)
 
@@ -129,6 +141,22 @@ def apply_analysis(
     interaction.processed = True
     s.flush()
     return counts
+
+
+def _apply_routing(
+    s: Session, contact: Contact, interaction: Interaction, analysis: ConversationAnalysis
+) -> None:
+    """Record what the conversation was for, and who the other party is."""
+    interaction.category = CallCategory(getattr(analysis, "category", "other"))
+    interaction.product_line = ProductLine(getattr(analysis, "product_line", "none"))
+    interaction.category_confidence = getattr(analysis, "category_confidence", None)
+
+    # Promote a contact off the customer default only on a confident read: a
+    # misfiled vendor disappears from the follow-up lists that matter.
+    kind = ContactKind(getattr(analysis, "contact_kind", "customer"))
+    confident = (analysis.category_confidence or 0) >= 0.6
+    if kind != ContactKind.customer and confident and contact.kind == ContactKind.customer:
+        contact.kind = kind
 
 
 def _apply_person(s: Session, contact: Contact, analysis: ConversationAnalysis) -> None:
@@ -326,6 +354,9 @@ def build_profile_context(s: Session, contact: Contact) -> tuple[str, str, str, 
 
 def refresh_profile(s: Session, contact: Contact) -> bool:
     """Rewrite the contact's narrative profile. False if the AI was unavailable."""
+    if contact.kind in (ContactKind.staff, ContactKind.other):
+        # Colleagues do not need a customer profile written about them.
+        return False
     label, facts_block, needs_block, history_block = build_profile_context(s, contact)
     try:
         narrative = enrich.write_profile(

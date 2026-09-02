@@ -16,11 +16,59 @@ Two things make a business relationship work, and they are different things:
 
 Capture both. Never collapse one into the other."""
 
+ROUTING_RULES = """\
+First, place the conversation. This shop is not only a service department, and
+most conversations have nothing to do with a work order.
+
+What the business does:
+{business_lines}
+
+Categories:
+- service   — work on a unit somebody owns: a repair, a diagnosis, a complaint
+              about work done, chasing a job already in the shop.
+- sales     — wants to buy, or is being sold to. Trade-ins, quotes on a new
+              unit, "do you have any left in stock".
+- boat_club — membership, joining, bookings, club rules, club billing.
+- rental    — renting for a day or a weekend.
+- parts     — a part or accessory, not attached to work the shop is doing.
+- storage   — winter storage, shrink wrap, winterization, haul-out, launch.
+- billing   — an invoice, a deposit, a payment, a refund. Money questions about
+              work that is already done.
+- vendor    — a supplier, manufacturer rep, freight carrier, contractor or
+              anyone selling to the shop.
+- internal  — staff talking to staff.
+- personal  — not shop business at all.
+- spam      — robocall, telemarketer, warranty scam, silence.
+- other     — real shop business that fits none of the above. Use it. A wrong
+              guess is worse than 'other'.
+
+Rules that matter more than the rest:
+
+- **Do not stretch a category to reach a work order.** A customer with a boat in
+  the shop who calls about a kayak is a `sales` call, not `service`. Someone
+  asking about club hours is `boat_club` even mid-repair. The open work orders
+  you are shown are context, not a prompt to use them.
+- Only `service`, `parts`, `storage` and `billing` can concern a work order at
+  all, and even then only when the conversation actually referred to one. A
+  `sales` or `boat_club` conversation never produces a ticket update.
+- One conversation, one category. Pick what the person actually called about.
+  If they raised two unrelated things, pick the one that took up the call and
+  put the other in the summary.
+- `product_line` is what was discussed, not what they own. Someone calling
+  about their trailer while their boat is in for service is `trailer`.
+- Set `category_confidence` below 0.5 on a short, garbled or ambiguous call.
+  A confidently wrong category is worse than an unsure one.
+- `spam` means genuinely nothing to act on. A cold call from a supplier you
+  might actually use is `vendor`, not spam.
+"""
+
 CONVERSATION_ANALYST = f"""\
 You extract structured records from business conversations for a small-business
 CRM. The operator is {{operator_name}}{{business_clause}}.
 
 {OPERATING_PRINCIPLE}
+
+{{routing_rules}}
 
 Rules:
 - Extract only what is actually supported by the text. Do not invent a name, a
@@ -42,6 +90,9 @@ Rules:
   prices, and schedules. Use content, not the label, to decide who said what.
 - Write summaries for someone who was on the call and needs their memory
   refreshed six weeks later, not for someone who wasn't there.
+- On a `vendor`, `internal`, `personal` or `spam` conversation, leave facts,
+  needs, tasks and appointments empty unless something was genuinely committed
+  to. A rep's cold call does not create a customer need.
 - Times are local to {{timezone}}. The conversation happened at {{occurred_at}};
   resolve relative dates like "Tuesday" against that.
 """
@@ -85,11 +136,18 @@ Rules:
 
 
 def conversation_system(
-    *, operator_name: str, business: str, timezone: str, occurred_at: str
+    *,
+    operator_name: str,
+    business: str,
+    timezone: str,
+    occurred_at: str,
+    business_lines: list[str] | None = None,
 ) -> str:
+    lines = "\n".join(f"- {line}" for line in (business_lines or [])) or "- (not set)"
     return CONVERSATION_ANALYST.format(
         operator_name=operator_name,
         business_clause=f", who runs {business}" if business else "",
+        routing_rules=ROUTING_RULES.format(business_lines=lines),
         timezone=timezone,
         occurred_at=occurred_at,
     )

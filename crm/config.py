@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     # --- identity of the operator (used to tell "me" from "the caller") ---
     operator_name: str = Field("Me", alias="OPERATOR_NAME")
     operator_business: str = Field("", alias="OPERATOR_BUSINESS")
+    # What the business actually sells and services, in your own words. Fed to
+    # the analyst so it routes calls against your real lines rather than a
+    # generic guess. One per line or comma separated.
+    business_lines: str = Field(
+        "Powerboat sales and service; sailboats; kayaks and paddleboards; "
+        "e-bikes; a boat club; winter storage, shrink wrap and winterization; "
+        "parts and accessories",
+        alias="BUSINESS_LINES",
+    )
     operator_email: str = Field("", alias="OPERATOR_EMAIL")
     operator_aliases: str = Field("", alias="OPERATOR_ALIASES")  # comma separated
     operator_numbers: str = Field("", alias="OPERATOR_NUMBERS")  # comma separated
@@ -147,6 +156,11 @@ class Settings(BaseSettings):
             if addr and "@" in addr:
                 seen[addr] = None
         return list(seen)
+
+    @property
+    def business_line_list(self) -> list[str]:
+        raw = self.business_lines.replace("\n", ";")
+        return [line.strip() for line in raw.split(";") if line.strip()]
 
     @property
     def servicetracker_configured(self) -> bool:

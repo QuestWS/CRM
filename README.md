@@ -24,6 +24,9 @@ them back.
   agreed on, pushed to Google Calendar.
 - **Writes you a brief each morning**: what to do today, what's waiting on
   others, who's going cold.
+- **Routes every conversation** — service, sales, boat club, rental, parts,
+  storage, billing, vendor, internal, spam — across your product lines, so a
+  kayak enquiry is never mistaken for a service call.
 - **Matches conversations to open work orders** in
   [`QuestWS/servicetracker`](https://github.com/QuestWS/servicetracker), and
   stages a note for the job log that you send with one click.
@@ -67,6 +70,7 @@ Requires Python 3.11+ and `ffmpeg` (for splitting stereo call recordings —
 | Setting | Why it matters |
 |---|---|
 | `OPERATOR_NUMBERS` | Every number that is you. Without these the CRM can't tell inbound calls from outbound. |
+| `BUSINESS_LINES` | What you sell and service. Drives how calls get categorised. |
 | `OPERATOR_EMAIL` / `OPERATOR_ALIASES` | Same job for email — this is how sent mail is recognised as yours. |
 | `ANTHROPIC_API_KEY` | Without it you still get recordings and transcripts, but no summaries, profiles or extracted tasks. |
 | `IMAP_*` | On Gmail use an **App Password**, not your account password. |
@@ -110,6 +114,7 @@ python -m crm.cli intake counter.wav  # a drop-off recording -> draft work order
 | **Calls** | Every recording and its processing status; upload files here |
 | **Tasks** | Everything outstanding, overdue first |
 | **Calendar** | Appointments, and one click to push them to Google |
+| **Conversations** | Everything that came in, filtered by what it was about |
 | **Drop-off** | The counter record button, and recent intakes |
 | **Work orders** | Open jobs from the service tracker, and notes waiting to send |
 | **Brief** | The morning brief |
@@ -149,6 +154,29 @@ engine); **transcripts and email text go to the Anthropic API** for
 summarisation; **everything else stays in your SQLite file**. Encrypt the disk —
 it's the highest-value ten minutes of security work here — and back up
 `data/crm.db` and `media/`.
+
+## Not every call is a service call
+
+The shop sells boats, kayaks, sailboats and e-bikes, runs a club, stores and
+winterizes, and takes as many vendor and staff calls as customer ones. Every
+conversation is placed on two axes:
+
+- **Category** — what they wanted: `service`, `sales`, `boat_club`, `rental`,
+  `parts`, `storage`, `billing`, `vendor`, `internal`, `personal`, `spam`,
+  `other`.
+- **Product line** — what it was about: powerboat, sailboat, kayak,
+  paddleboard, e-bike, trailer, engine, apparel.
+
+Only `service`, `parts`, `storage` and `billing` can concern a work order, and
+that is enforced in code rather than left to the prompt: a customer with a boat
+in the shop who calls about a kayak gets a `sales` conversation and no note on
+their open job.
+
+`spam` and `internal` conversations are recorded but build no profile, no needs
+and no tasks — robocalls don't get customer profiles. Vendors and staff are
+marked as such and drop out of the follow-up lists.
+
+Set `BUSINESS_LINES` in `.env` to your actual lines; the router uses it.
 
 ## The service tracker
 

@@ -37,7 +37,11 @@ class PipelineError(RuntimeError):
 
 def _context_with_tickets(s: Session, contact) -> str:
     """Everything on file, plus the person's open work orders in the shop."""
+    from crm.models import ContactKind
+
     parts = [profile_service.known_context_block(s, contact)]
+    if contact is not None and contact.kind is not ContactKind.customer:
+        return parts[0]
     tickets = ticket_service.tickets_context_block(s, contact)
     if tickets:
         parts.append(tickets)

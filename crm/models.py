@@ -85,6 +85,62 @@ class TaskStatus(enum.StrEnum):
     dismissed = "dismissed"
 
 
+class CallCategory(enum.StrEnum):
+    """What the conversation was actually for.
+
+    The shop is not only a service department: it sells boats, kayaks,
+    sailboats and e-bikes, runs a boat club, stores and winterizes, and takes
+    as many vendor and staff calls as customer ones. Only a few of these have
+    anything to do with a work order, and routing on this is what stops a
+    kayak enquiry attaching a note to somebody's open service ticket.
+    """
+
+    service = "service"          # work on a unit — the only common work-order path
+    sales = "sales"              # wants to buy
+    boat_club = "boat_club"      # membership, bookings, club questions
+    rental = "rental"
+    parts = "parts"              # parts and accessories
+    storage = "storage"          # winter storage, shrink wrap, haul and launch
+    billing = "billing"          # invoices, deposits, payments
+    vendor = "vendor"            # suppliers, reps, freight, contractors
+    internal = "internal"        # staff to staff
+    personal = "personal"        # not shop business at all
+    spam = "spam"                # robocall, telemarketing, scam
+    other = "other"
+
+
+class ProductLine(enum.StrEnum):
+    """Which side of the business it concerns. Orthogonal to the category."""
+
+    powerboat = "powerboat"
+    sailboat = "sailboat"
+    kayak = "kayak"
+    paddleboard = "paddleboard"
+    ebike = "ebike"
+    trailer = "trailer"
+    engine = "engine"
+    apparel = "apparel"
+    multiple = "multiple"
+    none = "none"
+
+
+class ContactKind(enum.StrEnum):
+    customer = "customer"
+    vendor = "vendor"
+    staff = "staff"
+    other = "other"
+
+
+# Only these ever get looked at against an open work order. A boat-club
+# booking or a rep chasing an invoice has no business writing to a job log.
+WORK_ORDER_CATEGORIES = frozenset(
+    {CallCategory.service, CallCategory.parts, CallCategory.storage, CallCategory.billing}
+)
+
+# Nothing is learned from these: no profile rewrite, no needs, no facts.
+NO_PROFILE_CATEGORIES = frozenset({CallCategory.spam, CallCategory.internal})
+
+
 class NoteStatus(enum.StrEnum):
     pending = "pending"      # staged, waiting for a human to approve the push
     pushed = "pushed"
@@ -116,6 +172,9 @@ class Contact(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     display_name: Mapped[str] = mapped_column(String(255), default="Unknown caller")
+    kind: Mapped[ContactKind] = mapped_column(
+        Enum(ContactKind), default=ContactKind.customer, index=True
+    )
     first_name: Mapped[str | None] = mapped_column(String(120))
     last_name: Mapped[str | None] = mapped_column(String(120))
     company: Mapped[str | None] = mapped_column(String(255))
@@ -220,6 +279,14 @@ class Interaction(Base):
     meta: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # What this conversation was for, and which side of the business it
+    # touched. Set by the analyst; `category` is what gates work-order linking.
+    category: Mapped[CallCategory | None] = mapped_column(
+        Enum(CallCategory), index=True
+    )
+    product_line: Mapped[ProductLine | None] = mapped_column(Enum(ProductLine))
+    category_confidence: Mapped[float | None] = mapped_column(Float)
 
     # The open work order this conversation was about, when it could be worked
     # out. A string because service-tracker job ids are BiT invoice numbers.

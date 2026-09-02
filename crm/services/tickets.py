@@ -22,6 +22,8 @@ from crm.integrations.servicetracker import (
     get_client,
 )
 from crm.models import (
+    WORK_ORDER_CATEGORIES,
+    CallCategory,
     Contact,
     Interaction,
     NoteStatus,
@@ -161,6 +163,19 @@ def stage_notes(s: Session, interaction: Interaction, analysis) -> list[TicketNo
     Only tickets that actually exist and are open are accepted - the model is
     told to copy an id from the list it was given, and this is what enforces it.
     """
+    # The prompt says a sales or boat-club conversation never touches a work
+    # order. This is what makes that true: most calls to this shop are not
+    # service calls, and a kayak enquiry must not staple a note to the
+    # caller's open engine job just because they have one.
+    category = getattr(analysis, "category", None)
+    if category is not None and CallCategory(category) not in WORK_ORDER_CATEGORIES:
+        if getattr(analysis, "ticket_updates", None):
+            log.info(
+                "dropping %d ticket update(s) on a %s conversation (interaction %s)",
+                len(analysis.ticket_updates), category, interaction.id,
+            )
+        return []
+
     staged: list[TicketNote] = []
     for update in getattr(analysis, "ticket_updates", []) or []:
         ticket = s.get(ServiceTicket, str(update.ticket_id).strip())

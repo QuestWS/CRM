@@ -156,3 +156,17 @@ button.rec.on { background: var(--bad); border-color: var(--bad); }
 button.ghost { background: transparent; color: var(--muted); }
 .pill.p-draft, .pill.p-linked { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .pill.p-transcribing { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+
+/* --- category chips and filters --- */
+.chips { display: flex; gap: .4rem; flex-wrap: wrap; margin: .75rem 0 1.25rem; }
+a.chip {
+  display: inline-block; padding: .2rem .6rem; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--line);
+  color: var(--muted); font-size: .85rem; text-decoration: none;
+}
+a.chip:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+a.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pill.cat {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent); font-weight: 550;
+}

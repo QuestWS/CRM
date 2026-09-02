@@ -82,6 +82,25 @@ be deleted, the call can't be re-held. The analysis is cheap to redo. So the
 transcript is committed the moment it exists, and analysis failures never roll it
 back.
 
+## Routing, and why it is a code gate
+
+Every conversation gets a `category` (what they wanted) and a `product_line`
+(what it was about). Most calls to this shop are not service calls, so the
+first thing the analyst does is place the conversation.
+
+`WORK_ORDER_CATEGORIES` in `crm/models.py` is the whole rule: only `service`,
+`parts`, `storage` and `billing` may produce a ticket note. `stage_notes`
+checks it and drops anything else, logging what it dropped.
+
+That gate is deliberately in code rather than only in the prompt. The prompt
+tells the model not to stretch a category to reach a work order; the gate is
+what makes it true when the model does it anyway. The same pattern as the
+ticket-id check next to it: the model is asked to copy an id from a list, and
+staging then verifies the ticket exists and is open.
+
+`NO_PROFILE_CATEGORIES` does the corresponding thing for noise: a `spam` or
+`internal` conversation is recorded, and nothing is learned from it.
+
 ## Identity resolution
 
 Every path that creates a record goes through `resolve_contact()`. Rules:

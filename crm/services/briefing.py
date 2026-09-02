@@ -12,7 +12,9 @@ from crm.ai.client import AIUnavailable
 from crm.ai.schemas import DailyBrief
 from crm.models import (
     Appointment,
+    CallCategory,
     Contact,
+    ContactKind,
     Interaction,
     InteractionKind,
     Need,
@@ -82,6 +84,8 @@ def going_cold(s: Session, days: int = GOING_COLD_DAYS, limit: int = 20) -> list
             .join(Need, Need.contact_id == Contact.id)
             .where(
                 Need.status.in_([NeedStatus.open, NeedStatus.in_progress]),
+                # Vendors and staff do not go cold; chasing them is noise.
+                Contact.kind == ContactKind.customer,
                 or_(
                     Contact.last_contacted_at.is_(None),
                     Contact.last_contacted_at < cutoff,
@@ -121,9 +125,18 @@ def unprocessed_counts(s: Session) -> dict[str, int]:
 
 
 def recent_interactions(s: Session, limit: int = 15) -> list[Interaction]:
+    """Recent conversations, minus the ones nobody needs to see again."""
     return list(
         s.scalars(
-            select(Interaction).order_by(Interaction.occurred_at.desc()).limit(limit)
+            select(Interaction)
+            .where(
+                or_(
+                    Interaction.category.is_(None),
+                    Interaction.category.notin_([CallCategory.spam]),
+                )
+            )
+            .order_by(Interaction.occurred_at.desc())
+            .limit(limit)
         )
     )
 
@@ -187,8 +200,11 @@ def build_brief_context(s: Session) -> str:
     lines.append("\n<recent_conversations>")
     for i in recent_interactions(s, limit=12):
         who = s.get(Contact, i.contact_id) if i.contact_id else None
+        label = f"{i.kind.value}"
+        if i.category:
+            label += f"/{i.category.value}"
         lines.append(
-            f"- {i.occurred_at:%d %b %H:%M} {i.kind.value} "
+            f"- {i.occurred_at:%d %b %H:%M} {label} "
             f"with {who.display_name if who else 'unknown'}: "
             f"{i.summary or i.outcome or (i.subject or '')}"
         )

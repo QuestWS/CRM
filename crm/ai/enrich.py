@@ -79,6 +79,7 @@ def analyze_conversation(
             business=settings.operator_business,
             timezone=settings.timezone,
             occurred_at=occurred_at.isoformat(),
+            business_lines=settings.business_line_list,
         ),
         prompt="\n".join(parts),
         schema=ConversationAnalysis,

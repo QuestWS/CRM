@@ -55,6 +55,9 @@ Then open `/tickets`.
 
 ## How a call finds its work order
 
+0. **Routing** happens first. Only `service`, `parts`, `storage` and `billing`
+   conversations are eligible at all — a sales enquiry, a club booking or a rep
+   chasing an order never reaches step 4, even from a customer with an open job.
 1. **Sync** mirrors every job into `ServiceTicket`, normalising the phone and
    email the shop holds so they match the CRM's format.
 2. **Linking** attaches each ticket to a contact — by an existing link first,
@@ -67,8 +70,9 @@ Then open `/tickets`.
    reach the shop's job log.
 5. **Review** at `/tickets`, then send.
 
-A call from someone with no open ticket produces no notes. Most calls are like
-that, and the prompt says so.
+A call from someone with no open ticket produces no notes. So does a call in
+any category that has nothing to do with a work order. Most calls to this shop
+are like that — the prompt says so, and `stage_notes` enforces it.
 
 ## What a pushed note looks like
 

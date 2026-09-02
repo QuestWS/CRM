@@ -1,6 +1,7 @@
 """Engine / session plumbing."""
 from __future__ import annotations
 
+import enum
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -48,8 +49,8 @@ def ensure_schema() -> None:
     are only ever appended, never renamed, reordered or dropped, which makes an
     additive ALTER the whole of the migration story.
 
-    Anything beyond adding a nullable column is deliberately out of scope and
-    is logged rather than guessed at.
+    Only ever additive: it does not rename, reorder, drop or retype anything,
+    and it does not touch a column that already exists.
     """
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -61,22 +62,45 @@ def ensure_schema() -> None:
         for column in table.columns:
             if column.name in present:
                 continue
-            if not column.nullable and column.server_default is None:
-                log.warning(
-                    "cannot add NOT NULL column %s.%s automatically - "
-                    "migrate it by hand",
-                    table.name, column.name,
-                )
-                continue
+            backfill = _default_value(column)
             ddl = column.type.compile(engine.dialect)
-            # No FK clause: SQLite cannot add a constrained column to a
-            # populated table, and the application checks these references
-            # anyway.
+            # Always added nullable, even where the model says NOT NULL: SQLite
+            # cannot add a NOT NULL column to a populated table at all, and the
+            # ORM supplies the default on every insert from here on. Rows that
+            # predate the column are backfilled below when there is a plain
+            # default to use, and otherwise honestly read as unknown.
+            # No FK clause either - SQLite rejects one on ALTER, and the
+            # application checks these references anyway.
             with engine.begin() as conn:
                 conn.execute(
                     text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {ddl}')
                 )
-            log.info("added column %s.%s", table.name, column.name)
+                if backfill is not None:
+                    conn.execute(
+                        text(
+                            f'UPDATE "{table.name}" SET "{column.name}" = :value '
+                            f'WHERE "{column.name}" IS NULL'
+                        ),
+                        {"value": backfill},
+                    )
+            log.info(
+                "added column %s.%s%s",
+                table.name, column.name,
+                f" (backfilled {backfill!r})" if backfill is not None else "",
+            )
+
+
+def _default_value(column):
+    """The model's Python-side default, when it is a plain value we can store.
+
+    Callables (`utcnow`, `list`) are deliberately not resolved: stamping every
+    historical row with today's date would be worse than leaving them null.
+    """
+    default = column.default
+    if default is None or default.is_callable or default.is_sequence:
+        return None
+    value = default.arg
+    return value.value if isinstance(value, enum.Enum) else value
 
 
 @contextmanager

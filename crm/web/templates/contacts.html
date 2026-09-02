@@ -2,19 +2,27 @@
 {% block title %}People{% endblock %}
 {% block content %}
 <h1>People {% if q %}<span class="muted">matching "{{ q }}"</span>{% endif %}</h1>
+<div class="chips">
+  <a class="chip {{ 'on' if not kind }}" href="/contacts{% if q %}?q={{ q }}{% endif %}">everyone</a>
+  {% for k in kinds %}
+  <a class="chip {{ 'on' if kind == k }}"
+     href="/contacts?kind={{ k }}{% if q %}&q={{ q }}{% endif %}">{{ k }}</a>
+  {% endfor %}
+</div>
 <table class="grid">
-  <thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>Last contact</th></tr></thead>
+  <thead><tr><th>Name</th><th>Type</th><th>Company</th><th>Phone</th><th>Email</th><th>Last contact</th></tr></thead>
   <tbody>
   {% for c in contacts %}
     <tr>
       <td><a href="/contacts/{{ c.id }}">{{ c.display_name }}</a></td>
+      <td>{% if c.kind.value != 'customer' %}<span class="pill">{{ c.kind.value }}</span>{% endif %}</td>
       <td>{{ c.company or '' }}</td>
       <td>{{ c.primary_phone | phone }}</td>
       <td>{{ c.primary_email or '' }}</td>
       <td>{% if c.last_contacted_at %}{{ c.last_contacted_at.strftime('%d %b %Y') }}{% else %}<span class="muted">never</span>{% endif %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="5" class="muted">No contacts yet. They appear automatically as calls and emails come in.</td></tr>
+    <tr><td colspan="6" class="muted">No contacts yet. They appear automatically as calls and emails come in.</td></tr>
   {% endfor %}
   </tbody>
 </table>

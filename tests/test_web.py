@@ -142,3 +142,49 @@ def test_ensure_schema_adds_a_missing_column(tmp_path):
     columns = {c["name"] for c in sa.inspect(engine).get_columns("interactions")}
     assert "ticket_id" in columns
     assert "summary" in columns
+    assert "category" in columns
+
+
+def test_ensure_schema_backfills_a_not_null_column(tmp_path):
+    """contacts.kind is NOT NULL with a Python default; SQLite cannot add that
+    directly, so it goes in nullable and existing rows are backfilled."""
+    import sqlalchemy as sa
+
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as conn:
+        conn.execute(sa.text(
+            "CREATE TABLE contacts (id INTEGER PRIMARY KEY, display_name VARCHAR)"
+        ))
+        conn.execute(sa.text("INSERT INTO contacts (display_name) VALUES ('Dave')"))
+
+    import crm.db as db_module
+
+    original = db_module.engine
+    db_module.engine = engine
+    try:
+        db_module.ensure_schema()
+    finally:
+        db_module.engine = original
+
+    with engine.connect() as conn:
+        assert conn.execute(sa.text("SELECT kind FROM contacts")).scalar() == "customer"
+        # A callable default is not resolved - stamping history with today
+        # would be worse than a null.
+        assert conn.execute(sa.text("SELECT created_at FROM contacts")).scalar() is None
+
+
+@pytest.mark.parametrize("path", ["/conversations", "/contacts?kind=vendor"])
+def test_filtered_pages_render(client, path):
+    assert client.get(path).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "path", ["/conversations?category=sales", "/conversations?category=vendor"]
+)
+def test_category_filters_render(client, path):
+    assert client.get(path).status_code == 200
+
+
+def test_bad_filter_values_are_rejected_not_ignored(client):
+    assert client.get("/conversations", params={"category": "nope"}).status_code == 400
+    assert client.get("/contacts", params={"kind": "nope"}).status_code == 400

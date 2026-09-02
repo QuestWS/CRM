@@ -6,7 +6,15 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Urgency = Literal["low", "normal", "high", "urgent"]
-Category = Literal["personal", "business", "preference", "logistics", "other"]
+Category = Literal[
+    "service", "sales", "boat_club", "rental", "parts", "storage",
+    "billing", "vendor", "internal", "personal", "spam", "other",
+]
+Product = Literal[
+    "powerboat", "sailboat", "kayak", "paddleboard", "ebike",
+    "trailer", "engine", "apparel", "multiple", "none",
+]
+FactKind = Literal["personal", "business", "preference", "logistics", "other"]
 
 
 class ExtractedPerson(BaseModel):
@@ -28,7 +36,7 @@ class ExtractedPerson(BaseModel):
 
 
 class ExtractedFact(BaseModel):
-    category: Category
+    category: FactKind
     text: str = Field(description="One durable fact, written in the third person.")
     quote: str | None = Field(None, description="The words they used, if short and clear.")
     confidence: float = Field(0.7, description="0-1.")
@@ -98,6 +106,28 @@ class TicketUpdate(BaseModel):
 
 class ConversationAnalysis(BaseModel):
     """What one call or email yields."""
+
+    category: Category = Field(
+        description="What this conversation was for. Most calls are not about a "
+        "work order - a sales enquiry, a club booking, a rep chasing an order "
+        "and a wrong number are all ordinary traffic. Pick 'other' rather than "
+        "forcing one that nearly fits."
+    )
+    category_confidence: float = Field(
+        0.7, description="0-1. Below 0.5 if the conversation was too short or "
+        "unclear to place."
+    )
+    product_line: Product = Field(
+        "none",
+        description="Which side of the business it concerned. 'none' when no "
+        "product came up - a billing question or an internal call usually has "
+        "none. 'multiple' only if genuinely more than one.",
+    )
+    contact_kind: Literal["customer", "vendor", "staff", "other"] = Field(
+        "customer",
+        description="Who the other party is. A supplier, rep, freight carrier "
+        "or contractor is 'vendor'. A colleague is 'staff'.",
+    )
 
     summary: str = Field(description="3-6 sentences. What happened and what it means.")
     outcome: str = Field(description="One line: where things stand now.")

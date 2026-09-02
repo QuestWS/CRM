@@ -45,6 +45,7 @@
       {% for i in recent %}
       <li>
         <span class="kind k-{{ i.kind.value }}">{{ i.kind.value }}</span>
+        {% if i.category %}<span class="pill cat">{{ i.category.value.replace('_', ' ') }}</span>{% endif %}
         {{ contact_link(i.contact) }}
         <span class="muted">{{ i.occurred_at.strftime('%d %b %H:%M') }}</span>
         <div class="detail">{{ i.summary or i.subject or '' }}</div>

@@ -41,6 +41,9 @@ def make_interaction(session, contact, when=None):
 
 def analysis(**overrides) -> ConversationAnalysis:
     base = dict(
+        category="service",
+        category_confidence=0.9,
+        product_line="powerboat",
         summary="Dave called about a furnace quote.",
         outcome="Quote owed by Friday.",
         sentiment="neutral",

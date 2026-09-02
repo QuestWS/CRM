@@ -44,6 +44,9 @@ TRANSCRIPT = (
 )
 
 ANALYSIS = ConversationAnalysis(
+    category="service",
+    category_confidence=0.9,
+    product_line="powerboat",
     summary="Dave Mercer called about a noisy furnace and booked a Friday visit.",
     outcome="Site visit Friday 2pm; quote owed Thursday.",
     sentiment="neutral",

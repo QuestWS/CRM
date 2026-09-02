@@ -22,15 +22,17 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from crm.config import settings
 from crm.db import get_session, init_db, session_scope
 from crm.models import (
     Appointment,
+    CallCategory,
     Contact,
     ContactEmail,
+    ContactKind,
     ContactPhone,
     Direction,
     Fact,
@@ -99,8 +101,15 @@ def brief_page(request: Request, s: Session = Depends(get_session)):
 # contacts
 # --------------------------------------------------------------------------- #
 @app.get("/contacts", response_class=HTMLResponse)
-def contact_list(request: Request, q: str = "", s: Session = Depends(get_session)):
+def contact_list(
+    request: Request, q: str = "", kind: str = "", s: Session = Depends(get_session)
+):
     stmt = select(Contact)
+    if kind:
+        try:
+            stmt = stmt.where(Contact.kind == ContactKind(kind))
+        except ValueError:
+            raise HTTPException(400, f"Unknown contact kind {kind!r}") from None
     if q:
         like = f"%{q}%"
         stmt = (
@@ -120,7 +129,14 @@ def contact_list(request: Request, q: str = "", s: Session = Depends(get_session
     contacts = list(
         s.scalars(stmt.order_by(Contact.last_contacted_at.desc().nulls_last()).limit(200))
     )
-    return render(request, "contacts.html", contacts=contacts, q=q)
+    return render(
+        request,
+        "contacts.html",
+        contacts=contacts,
+        q=q,
+        kind=kind,
+        kinds=[k.value for k in ContactKind],
+    )
 
 
 @app.get("/contacts/{contact_id}", response_class=HTMLResponse)
@@ -301,6 +317,35 @@ def appointment_sync(appointment_id: int, s: Session = Depends(get_session)):
 # --------------------------------------------------------------------------- #
 # calls
 # --------------------------------------------------------------------------- #
+@app.get("/conversations", response_class=HTMLResponse)
+def conversation_list(
+    request: Request, category: str = "", s: Session = Depends(get_session)
+):
+    """Everything that came in, filterable by what it was about."""
+    stmt = select(Interaction)
+    if category:
+        try:
+            stmt = stmt.where(Interaction.category == CallCategory(category))
+        except ValueError:
+            raise HTTPException(400, f"Unknown category {category!r}") from None
+
+    rows = list(s.scalars(stmt.order_by(Interaction.occurred_at.desc()).limit(200)))
+    counts = dict(
+        s.execute(
+            select(Interaction.category, func.count(Interaction.id))
+            .group_by(Interaction.category)
+        ).all()
+    )
+    return render(
+        request,
+        "conversations.html",
+        interactions=rows,
+        category=category,
+        counts={(k.value if k else "unclassified"): v for k, v in counts.items()},
+        categories=[c.value for c in CallCategory],
+    )
+
+
 @app.get("/calls", response_class=HTMLResponse)
 def call_list(request: Request, s: Session = Depends(get_session)):
     recordings = list(

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_macros.html" import contact_link %}
+{% block title %}Conversations{% endblock %}
+{% block content %}
+<h1>Conversations</h1>
+<p class="muted">Most calls here are not service calls. Filter to what you're after.</p>
+
+<div class="chips">
+  <a class="chip {{ 'on' if not category }}" href="/conversations">
+    all ({{ counts.values() | sum }})</a>
+  {% for c in categories %}
+    {% if counts.get(c) %}
+    <a class="chip {{ 'on' if category == c }}" href="/conversations?category={{ c }}">
+      {{ c.replace('_', ' ') }} ({{ counts[c] }})</a>
+    {% endif %}
+  {% endfor %}
+  {% if counts.get('unclassified') %}
+  <span class="chip muted">unclassified ({{ counts['unclassified'] }})</span>
+  {% endif %}
+</div>
+
+<ul class="feed">
+  {% for i in interactions %}
+  <li>
+    <span class="kind k-{{ i.kind.value }}">{{ i.kind.value }}</span>
+    {% if i.category %}<span class="pill cat">{{ i.category.value.replace('_', ' ') }}</span>{% endif %}
+    {% if i.product_line and i.product_line.value != 'none' %}
+      <span class="pill">{{ i.product_line.value }}</span>{% endif %}
+    {{ contact_link(i.contact) }}
+    <span class="muted">{{ i.occurred_at.strftime('%d %b %H:%M') }}</span>
+    {% if i.ticket_id %}<a class="pill" href="/tickets">WO {{ i.ticket_id }}</a>{% endif %}
+    {% if i.category_confidence and i.category_confidence < 0.5 %}
+      <span class="pill p-warn" title="The category is a guess">unsure</span>{% endif %}
+    <div class="detail">{{ i.summary or i.subject or '' }}</div>
+  </li>
+  {% else %}
+  <li class="muted">Nothing here.</li>
+  {% endfor %}
+</ul>
+{% endblock %}
