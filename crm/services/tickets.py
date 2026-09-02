@@ -1,12 +1,17 @@
-"""The bridge between conversations and open work orders.
+"""The bridge between conversations and open work.
 
-Three jobs: mirror the shop's open tickets locally, work out which ticket a
-call or email was about, and stage a note for the job log that a person then
-approves.
+Two shop apps own work items, and this mirrors both:
 
-Nothing here creates a job. A job id is a BiT invoice number, and BiT is never
-integrated with - that rule belongs to the service tracker and it holds on this
-side of the wire too.
+* **servicetracker** - repair jobs. Notes go on the job log as `writer_note`.
+* **winter-quotes** - winter services quotes. Notes go on the quote's staff
+  note, which is staff-side only.
+
+Three jobs either way: mirror what is open, work out which item a call or email
+was about, and stage a note that a person then approves.
+
+Nothing here creates work. A service-tracker job id is a BiT invoice number and
+BiT is never integrated with; a winter quote is created by the customer on the
+quote page. Both rules belong to those repos and hold on this side of the wire.
 """
 from __future__ import annotations
 
@@ -16,19 +21,18 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from crm.config import settings
-from crm.integrations.servicetracker import (
-    NotConfigured,
-    ServiceTrackerError,
-    get_client,
-)
+from crm.integrations import servicetracker, winterquotes
+from crm.integrations.servicetracker import NotConfigured, ServiceTrackerError
+from crm.integrations.winterquotes import WinterQuotesError
 from crm.models import (
     WORK_ORDER_CATEGORIES,
     CallCategory,
     Contact,
     Interaction,
     NoteStatus,
-    ServiceTicket,
     TicketNote,
+    WorkItem,
+    WorkSystem,
     utcnow,
 )
 from crm.services.identity import normalize_email, normalize_phone, resolve_contact
@@ -37,31 +41,43 @@ log = logging.getLogger(__name__)
 
 OPEN_STATUSES = ("received", "work_underway", "work_finished")
 
+# Filling in a winter quote's phone and email costs one call each, so a first
+# sync spreads the backfill over several runs instead of stalling on it.
+WINTER_LOOKUPS_PER_SYNC = 25
+
+
+def work_item_id(system: WorkSystem, remote_id: str) -> str:
+    """Namespaced key. The two apps number independently."""
+    return f"{system.value}:{str(remote_id).strip()}"
+
 
 # --------------------------------------------------------------------------- #
 # sync
 # --------------------------------------------------------------------------- #
 def sync_tickets(s: Session, *, status: str = "all") -> dict[str, int]:
     """Mirror the service tracker's jobs locally and link them to contacts."""
-    client = get_client()
+    client = servicetracker.get_client()
     jobs = client.list_jobs(status=status)
 
     seen: set[str] = set()
     created = updated = linked = 0
 
     for job in jobs:
-        job_id = str(job.get("id") or "").strip()
-        if not job_id:
+        remote_id = str(job.get("id") or "").strip()
+        if not remote_id:
             continue
+        job_id = work_item_id(WorkSystem.servicetracker, remote_id)
         seen.add(job_id)
 
         phone = normalize_phone(job.get("customerPhone"))
         email = normalize_email(job.get("customerEmail"))
         name = (job.get("customerName") or "").strip() or None
 
-        ticket = s.get(ServiceTicket, job_id)
+        ticket = s.get(WorkItem, job_id)
         if ticket is None:
-            ticket = ServiceTicket(id=job_id)
+            ticket = WorkItem(
+                id=job_id, system=WorkSystem.servicetracker, remote_id=remote_id
+            )
             s.add(ticket)
             created += 1
         else:
@@ -92,9 +108,16 @@ def sync_tickets(s: Session, *, status: str = "all") -> dict[str, int]:
                 ticket.contact_id = contact.id
                 linked += 1
 
-    # A job that dropped out of an "all" listing is gone over there.
+    # A job that dropped out of an "all" listing is gone over there. Scoped to
+    # this system so a winter quote is never closed by a service-tracker sync.
     if status == "all" and seen:
-        for stale in s.scalars(select(ServiceTicket).where(ServiceTicket.id.notin_(seen))):
+        stale_rows = s.scalars(
+            select(WorkItem).where(
+                WorkItem.system == WorkSystem.servicetracker,
+                WorkItem.id.notin_(seen),
+            )
+        )
+        for stale in stale_rows:
             stale.is_open = False
 
     s.flush()
@@ -104,10 +127,122 @@ def sync_tickets(s: Session, *, status: str = "all") -> dict[str, int]:
     return {"created": created, "updated": updated, "linked": linked}
 
 
+def sync_winter(s: Session) -> dict[str, int]:
+    """Mirror the winter services quotes and link them to contacts.
+
+    `storageView` is one call for the whole season but carries no phone or
+    email, so contact details are filled in with per-quote lookups, bounded per
+    run. A first sync therefore links progressively over a few passes rather
+    than hammering Apps Script in one.
+    """
+    client = winterquotes.get_client()
+    rows = client.storage_view()
+
+    seen: set[str] = set()
+    created = updated = linked = 0
+    lookups = 0
+
+    for row in rows:
+        remote_id = str(row.get("qn") or "").strip()
+        if not remote_id:
+            continue
+        item_id = work_item_id(WorkSystem.winter, remote_id)
+        seen.add(item_id)
+
+        item = s.get(WorkItem, item_id)
+        if item is None:
+            item = WorkItem(id=item_id, system=WorkSystem.winter, remote_id=remote_id)
+            s.add(item)
+            created += 1
+        else:
+            updated += 1
+
+        # storageView gives "Last, First"; the CRM wants it read as a name.
+        raw_name = str(row.get("name") or "").strip()
+        if "," in raw_name:
+            last, _, first = raw_name.partition(",")
+            raw_name = f"{first.strip()} {last.strip()}".strip()
+        item.customer_name = raw_name or None
+
+        unit = str(row.get("unit") or "").strip()
+        ymm = str(row.get("ymm") or "").strip()
+        item.boat_info = " ".join(x for x in (ymm, unit) if x) or None
+        item.storage_location = str(row.get("storage") or "").strip() or None
+        item.season_done = str(row.get("seasonDone") or "").strip() or None
+        item.balance = str(row.get("balance") or "").strip() or None
+        item.status = str(row.get("status") or "").strip() or "quoted"
+        item.status_label = item.status
+        # A quote stays open until the season is closed out on it. Balance is
+        # not the test: a paid boat still in the yard is very much open.
+        item.is_open = not item.season_done
+        item.synced_at = utcnow()
+
+        # Contact details need a per-quote lookup. Only for open quotes we
+        # cannot already match on, and only a bounded number per run.
+        needs_contact = item.is_open and not (item.customer_phone or item.customer_email)
+        if needs_contact and lookups < WINTER_LOOKUPS_PER_SYNC:
+            lookups += 1
+            try:
+                detail = client.lookup(remote_id)
+            except WinterQuotesError as exc:
+                log.warning("winter lookup failed for %s: %s", remote_id, exc)
+                detail = {}
+            item.customer_phone = normalize_phone(detail.get("phone")) or None
+            item.customer_email = normalize_email(detail.get("email")) or None
+            requested = detail.get("rqList") or []
+            if requested:
+                item.work_requested = "; ".join(str(x) for x in requested)
+
+        if item.contact_id is None and (item.customer_phone or item.customer_email):
+            contact = resolve_contact(
+                s,
+                phone=item.customer_phone,
+                email=item.customer_email,
+                name=item.customer_name,
+            )
+            if contact:
+                item.contact_id = contact.id
+                linked += 1
+
+    if seen:
+        stale_rows = s.scalars(
+            select(WorkItem).where(
+                WorkItem.system == WorkSystem.winter, WorkItem.id.notin_(seen)
+            )
+        )
+        for stale in stale_rows:
+            stale.is_open = False
+
+    s.flush()
+    log.info(
+        "winter sync: %d new, %d updated, %d newly linked, %d lookup(s)",
+        created, updated, linked, lookups,
+    )
+    return {"created": created, "updated": updated, "linked": linked, "lookups": lookups}
+
+
+def sync_all(s: Session) -> dict[str, dict]:
+    """Both systems. Neither failing stops the other."""
+    out: dict[str, dict] = {}
+    if settings.servicetracker_configured:
+        try:
+            out["servicetracker"] = sync_tickets(s)
+        except (ServiceTrackerError, NotConfigured) as exc:
+            log.warning("service tracker sync failed: %s", exc)
+            out["servicetracker"] = {"error": str(exc)}
+    if settings.winter_configured:
+        try:
+            out["winter"] = sync_winter(s)
+        except WinterQuotesError as exc:
+            log.warning("winter sync failed: %s", exc)
+            out["winter"] = {"error": str(exc)}
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # matching
 # --------------------------------------------------------------------------- #
-def open_tickets_for(s: Session, contact: Contact | None) -> list[ServiceTicket]:
+def open_tickets_for(s: Session, contact: Contact | None) -> list[WorkItem]:
     """Open work orders belonging to this person.
 
     Matched on contact link first, then on the phone and email recorded against
@@ -118,17 +253,17 @@ def open_tickets_for(s: Session, contact: Contact | None) -> list[ServiceTicket]
     phones = [p.e164 for p in contact.phones]
     emails = [e.address for e in contact.emails]
 
-    clauses = [ServiceTicket.contact_id == contact.id]
+    clauses = [WorkItem.contact_id == contact.id]
     if phones:
-        clauses.append(ServiceTicket.customer_phone.in_(phones))
+        clauses.append(WorkItem.customer_phone.in_(phones))
     if emails:
-        clauses.append(ServiceTicket.customer_email.in_(emails))
+        clauses.append(WorkItem.customer_email.in_(emails))
 
     return list(
         s.scalars(
-            select(ServiceTicket)
-            .where(ServiceTicket.is_open.is_(True), or_(*clauses))
-            .order_by(ServiceTicket.remote_updated_at.desc())
+            select(WorkItem)
+            .where(WorkItem.is_open.is_(True), or_(*clauses))
+            .order_by(WorkItem.remote_updated_at.desc())
         )
     )
 
@@ -139,17 +274,27 @@ def tickets_context_block(s: Session, contact: Contact | None) -> str:
     if not tickets:
         return ""
     lines = [
-        "Open work orders for this person in the shop. If the conversation was "
-        "about one of these, reference it by the exact number shown.",
+        "Open work on this person, across both shop systems. If the "
+        "conversation was about one of these, reference it by the exact id "
+        "shown in brackets, copied character for character.",
     ]
-    for t in tickets:
-        parts = [f"- {t.id} [{t.status_label or t.status}]"]
-        if t.boat_info:
-            parts.append(f"boat: {t.boat_info}")
-        if t.work_requested:
-            parts.append(f"asked for: {t.work_requested}")
-        if t.alert:
-            parts.append(f"ALERT on the job: {t.alert}")
+    for item in tickets:
+        kind = (
+            "winter services quote"
+            if item.system == WorkSystem.winter
+            else "repair job"
+        )
+        parts = [f"- [{item.id}] {kind} {item.remote_id} ({item.status_label or item.status})"]
+        if item.boat_info:
+            parts.append(f"unit: {item.boat_info}")
+        if item.storage_location:
+            parts.append(f"stored: {item.storage_location}")
+        if item.work_requested:
+            parts.append(f"covers: {item.work_requested}")
+        if item.balance:
+            parts.append(f"balance: {item.balance}")
+        if item.alert:
+            parts.append(f"ALERT: {item.alert}")
         lines.append(" | ".join(parts))
     return "\n".join(lines)
 
@@ -178,7 +323,7 @@ def stage_notes(s: Session, interaction: Interaction, analysis) -> list[TicketNo
 
     staged: list[TicketNote] = []
     for update in getattr(analysis, "ticket_updates", []) or []:
-        ticket = s.get(ServiceTicket, str(update.ticket_id).strip())
+        ticket = _resolve_item(s, update.ticket_id, interaction.contact_id)
         if ticket is None or not ticket.is_open:
             log.info(
                 "ignoring note for unknown or closed ticket %r on interaction %s",
@@ -199,7 +344,7 @@ def stage_notes(s: Session, interaction: Interaction, analysis) -> list[TicketNo
             ticket_id=ticket.id,
             contact_id=interaction.contact_id,
             source_interaction_id=interaction.id,
-            body=_format_note(interaction, update),
+            body=_format_note(interaction, update, ticket),
         )
         s.add(note)
         staged.append(note)
@@ -212,7 +357,38 @@ def stage_notes(s: Session, interaction: Interaction, analysis) -> list[TicketNo
     return staged
 
 
-def _format_note(interaction: Interaction, update) -> str:
+def _resolve_item(s: Session, raw_id, contact_id: int | None) -> WorkItem | None:
+    """Find the work item the model referred to.
+
+    The context block hands it a namespaced id and asks for it back verbatim,
+    which is the normal path. A bare number is accepted too - it is a plausible
+    thing for a model to return, and refusing it would drop a correct note over
+    a formatting detail. The bare form only resolves against *this contact's*
+    items, so it cannot reach across to somebody else's job.
+    """
+    wanted = str(raw_id or "").strip()
+    if not wanted:
+        return None
+
+    item = s.get(WorkItem, wanted)
+    if item is not None:
+        return item
+
+    if contact_id is None:
+        return None
+    candidates = s.scalars(
+        select(WorkItem).where(
+            WorkItem.contact_id == contact_id,
+            WorkItem.remote_id == wanted,
+            WorkItem.is_open.is_(True),
+        )
+    ).all()
+    # Ambiguous across systems is not resolvable, so it is refused rather than
+    # guessed at.
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _format_note(interaction: Interaction, update, item: WorkItem) -> str:
     """What lands in the shop's job log.
 
     Says where it came from, because a mechanic reading it needs to know this
@@ -227,7 +403,15 @@ def _format_note(interaction: Interaction, update) -> str:
 
     lines = [f"{origin}:", "", update.note.strip()]
     if update.changes_the_work:
-        lines += ["", "This changes the work — needs re-keying into BiT."]
+        # Only the service tracker's work feeds BiT. A winter quote is priced
+        # by its own engine, so naming BiT there would send someone to the
+        # wrong system.
+        lines += [
+            "",
+            "This changes the work — needs re-keying into BiT."
+            if item.system != WorkSystem.winter
+            else "This changes the work — the quote needs re-pricing.",
+        ]
     if update.needs_writer_attention:
         lines += ["", "Needs someone in the office to action it."]
     return "\n".join(lines)
@@ -237,11 +421,20 @@ def _format_note(interaction: Interaction, update) -> str:
 # pushing
 # --------------------------------------------------------------------------- #
 def push_note(s: Session, note: TicketNote) -> TicketNote:
-    """Send one staged note to the shop's job log."""
-    client = get_client()
+    """Send one staged note to whichever system owns the item."""
+    item = s.get(WorkItem, note.ticket_id)
+    if item is None:
+        note.status = NoteStatus.failed
+        note.error = "That work item is no longer in the CRM. Sync and try again."
+        s.flush()
+        raise ServiceTrackerError(note.error)
+
     try:
-        client.add_writer_note(note.ticket_id, note.body)
-    except ServiceTrackerError as exc:
+        if item.system == WorkSystem.winter:
+            _push_winter(s, item, note)
+        else:
+            servicetracker.get_client().add_writer_note(item.remote_id, note.body)
+    except (ServiceTrackerError, WinterQuotesError) as exc:
         note.status = NoteStatus.failed
         note.error = str(exc)
         s.flush()
@@ -251,8 +444,23 @@ def push_note(s: Session, note: TicketNote) -> TicketNote:
     note.pushed_at = utcnow()
     note.error = None
     s.flush()
-    log.info("pushed note %s to ticket %s", note.id, note.ticket_id)
+    log.info("pushed note %s to %s", note.id, note.ticket_id)
     return note
+
+
+def _push_winter(s: Session, item: WorkItem, note: TicketNote) -> None:
+    """The winter staff note REPLACES rather than appends.
+
+    So the existing note is read first and this one added underneath it. Losing
+    what a staff member wrote by hand because a call came in afterwards would
+    be a far worse bug than a note that is a little long.
+    """
+    client = winterquotes.get_client()
+    existing = client.get_staff_note(item.remote_id).strip()
+    if note.body.strip() in existing:
+        return  # already there; nothing to do and nothing to lose
+    combined = f"{existing}\n\n{note.body}".strip() if existing else note.body
+    client.set_staff_note(item.remote_id, combined)
 
 
 def pending_notes(s: Session, limit: int = 100) -> list[TicketNote]:
@@ -279,7 +487,7 @@ def push_all_pending(s: Session, limit: int = 50) -> dict[str, int]:
         try:
             push_note(s, note)
             stats["pushed"] += 1
-        except (ServiceTrackerError, NotConfigured):
+        except (ServiceTrackerError, WinterQuotesError, NotConfigured):
             stats["failed"] += 1
         s.commit()
     return stats

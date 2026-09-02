@@ -27,9 +27,10 @@ them back.
 - **Routes every conversation** — service, sales, boat club, rental, parts,
   storage, billing, vendor, internal, spam — across your product lines, so a
   kayak enquiry is never mistaken for a service call.
-- **Matches conversations to open work orders** in
-  [`QuestWS/servicetracker`](https://github.com/QuestWS/servicetracker), and
-  stages a note for the job log that you send with one click.
+- **Matches conversations to open work** in both
+  [`servicetracker`](https://github.com/QuestWS/servicetracker) (repair jobs)
+  and [`winter-quotes`](https://github.com/QuestWS/winter-quotes_26-27)
+  (winter services), and stages a note you send with one click.
 - **Records walk-in drop-offs** at the counter and turns them into a draft work
   order, with a list of what you still need to ask.
 
@@ -100,7 +101,7 @@ python -m crm.cli add-call rec.wav    # process one recording
 python -m crm.cli brief               # today's brief in the terminal
 python -m crm.cli brief --raw         # what the AI was given, for debugging
 python -m crm.cli refresh-profile 12  # rewrite one contact's profile
-python -m crm.cli sync-tickets        # pull open work orders from the shop app
+python -m crm.cli sync-work           # pull open jobs and winter quotes
 python -m crm.cli intake counter.wav  # a drop-off recording -> draft work order
 ```
 
@@ -116,7 +117,7 @@ python -m crm.cli intake counter.wav  # a drop-off recording -> draft work order
 | **Calendar** | Appointments, and one click to push them to Google |
 | **Conversations** | Everything that came in, filtered by what it was about |
 | **Drop-off** | The counter record button, and recent intakes |
-| **Work orders** | Open jobs from the service tracker, and notes waiting to send |
+| **Open work** | Repair jobs and winter quotes, and notes waiting to send |
 | **Brief** | The morning brief |
 
 ## Email over IMAP
@@ -178,12 +179,19 @@ marked as such and drop out of the follow-up lists.
 
 Set `BUSINESS_LINES` in `.env` to your actual lines; the router uses it.
 
-## The service tracker
+## The shop apps
 
-Conversations get matched to open work orders in the shop's own app, and a note
-for the job log is staged for you to send. Nothing is created in BiT and nothing
-customer-facing is ever sent — the only write is a `writer_note`, which is
-shop-only by construction over there.
+Conversations get matched to open work in **both** shop systems — repair jobs
+in the service tracker, winter services quotes in the winter system — and a
+note is staged for you to send.
+
+Nothing is created in BiT, no quote is invented, and nothing customer-facing is
+ever sent. The service tracker gets a `writer_note`, which is shop-only by
+construction over there. The winter system gets a staff note, appended beneath
+whatever a staff member already wrote — that note field *replaces*, so
+appending is what stops a phone call wiping out somebody's handwriting. The
+winter client wraps no send function at all, because that repo forbids emailing
+customers.
 
 The counter record button produces a draft work order you key into BiT, plus a
 timeline entry and profile facts for the customer.

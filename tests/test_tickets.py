@@ -6,13 +6,14 @@ import datetime as dt
 import pytest
 
 from crm.ai.schemas import ConversationAnalysis, ExtractedPerson, TicketUpdate
+from crm.integrations import servicetracker
 from crm.models import (
     Direction,
     Interaction,
     InteractionKind,
     NoteStatus,
-    ServiceTicket,
     TicketNote,
+    WorkItem,
 )
 from crm.services import tickets as ticket_service
 from crm.services.identity import resolve_contact
@@ -53,7 +54,7 @@ class FakeClient:
 @pytest.fixture
 def fake_client(monkeypatch):
     client = FakeClient([dict(JOB)])
-    monkeypatch.setattr(ticket_service, "get_client", lambda: client)
+    monkeypatch.setattr(servicetracker, "get_client", lambda: client)
     return client
 
 
@@ -87,7 +88,7 @@ def test_sync_mirrors_and_links_to_a_contact(session, fake_client):
     stats = ticket_service.sync_tickets(session)
 
     assert stats["created"] == 1
-    ticket = session.get(ServiceTicket, "WO-10432")
+    ticket = session.get(WorkItem, "servicetracker:WO-10432")
     assert ticket.contact_id == existing.id
     assert ticket.customer_phone == "+18155551234"   # normalised on the way in
     assert ticket.customer_email == "dave@example.com"
@@ -98,42 +99,42 @@ def test_sync_is_idempotent(session, fake_client):
     ticket_service.sync_tickets(session)
     stats = ticket_service.sync_tickets(session)
     assert stats["created"] == 0 and stats["updated"] == 1
-    assert session.query(ServiceTicket).count() == 1
+    assert session.query(WorkItem).count() == 1
 
 
 def test_sync_creates_a_contact_when_there_is_an_identifier(session, fake_client):
     ticket_service.sync_tickets(session)
-    ticket = session.get(ServiceTicket, "WO-10432")
+    ticket = session.get(WorkItem, "servicetracker:WO-10432")
     assert ticket.contact_id is not None
 
 
 def test_sync_skips_contact_creation_with_nothing_to_match_on(session, monkeypatch):
     bare = dict(JOB, customerPhone="", customerEmail="", id="WO-1")
-    monkeypatch.setattr(ticket_service, "get_client", lambda: FakeClient([bare]))
+    monkeypatch.setattr(servicetracker, "get_client", lambda: FakeClient([bare]))
     ticket_service.sync_tickets(session)
     # A name-only contact could never be matched to a call, so it isn't made.
-    assert session.get(ServiceTicket, "WO-1").contact_id is None
+    assert session.get(WorkItem, "servicetracker:WO-1").contact_id is None
 
 
 def test_closed_job_drops_out_of_open(session, monkeypatch):
-    monkeypatch.setattr(ticket_service, "get_client", lambda: FakeClient([dict(JOB)]))
+    monkeypatch.setattr(servicetracker, "get_client", lambda: FakeClient([dict(JOB)]))
     ticket_service.sync_tickets(session)
     done = dict(JOB, status="done", statusLabel="Done", paidAt="2024-09-05T00:00:00Z")
-    monkeypatch.setattr(ticket_service, "get_client", lambda: FakeClient([done]))
+    monkeypatch.setattr(servicetracker, "get_client", lambda: FakeClient([done]))
     ticket_service.sync_tickets(session)
-    assert session.get(ServiceTicket, "WO-10432").is_open is False
+    assert session.get(WorkItem, "servicetracker:WO-10432").is_open is False
 
 
 def test_open_tickets_match_by_phone_recorded_on_the_job(session, fake_client):
     """A ticket created before the contact existed still finds them."""
     ticket_service.sync_tickets(session)
-    ticket = session.get(ServiceTicket, "WO-10432")
+    ticket = session.get(WorkItem, "servicetracker:WO-10432")
     ticket.contact_id = None
     session.flush()
 
     contact = resolve_contact(session, phone="8155551234", name="Dave Mercer")
     found = ticket_service.open_tickets_for(session, contact)
-    assert [t.id for t in found] == ["WO-10432"]
+    assert [t.remote_id for t in found] == ["WO-10432"]
 
 
 def test_context_block_names_the_ticket(session, fake_client):
@@ -166,7 +167,7 @@ def test_staging_creates_a_pending_note_and_links_the_interaction(session, fake_
     assert note.status == NoteStatus.pending
     assert "From a phone call on 03 Sep, 14:30" in note.body
     assert "re-keying into BiT" in note.body
-    assert interaction.ticket_id == "WO-10432"
+    assert interaction.ticket_id == "servicetracker:WO-10432"
 
 
 def test_unknown_ticket_id_is_ignored(session, fake_client):
@@ -183,9 +184,9 @@ def test_unknown_ticket_id_is_ignored(session, fake_client):
 
 
 def test_closed_ticket_is_not_written_to(session, monkeypatch):
-    monkeypatch.setattr(ticket_service, "get_client", lambda: FakeClient([dict(JOB)]))
+    monkeypatch.setattr(servicetracker, "get_client", lambda: FakeClient([dict(JOB)]))
     ticket_service.sync_tickets(session)
-    session.get(ServiceTicket, "WO-10432").is_open = False
+    session.get(WorkItem, "servicetracker:WO-10432").is_open = False
     session.flush()
 
     contact = resolve_contact(session, phone="8155551234")

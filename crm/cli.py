@@ -137,21 +137,34 @@ def cmd_check_mail(_args) -> int:
 
 
 def cmd_sync_tickets(_args) -> int:
-    from crm.integrations.servicetracker import ServiceTrackerError
-    from crm.services.tickets import pending_notes, sync_tickets
+    from crm.services.tickets import pending_notes, sync_all
 
-    try:
-        with session_scope() as s:
-            stats = sync_tickets(s)
-            waiting = len(pending_notes(s))
-    except ServiceTrackerError as exc:
-        print(str(exc), file=sys.stderr)
+    if not (settings.servicetracker_configured or settings.winter_configured):
+        print(
+            "Neither shop app is configured. Set SERVICETRACKER_* and/or WINTER_* "
+            "in .env — see docs/servicetracker-integration.md.",
+            file=sys.stderr,
+        )
         return 1
-    print(f"{stats['created']} new, {stats['updated']} updated, "
-          f"{stats['linked']} linked to contacts")
+
+    with session_scope() as s:
+        stats = sync_all(s)
+        waiting = len(pending_notes(s))
+
+    failed = False
+    for system, result in stats.items():
+        if "error" in result:
+            print(f"{system}: FAILED — {result['error']}", file=sys.stderr)
+            failed = True
+            continue
+        extra = f", {result['lookups']} lookup(s)" if result.get("lookups") else ""
+        print(
+            f"{system}: {result['created']} new, {result['updated']} updated, "
+            f"{result['linked']} linked{extra}"
+        )
     if waiting:
-        print(f"{waiting} note(s) staged for job logs — review them at /tickets")
-    return 0
+        print(f"\n{waiting} note(s) staged — review them at /tickets")
+    return 1 if failed else 0
 
 
 def cmd_intake(args) -> int:
@@ -256,6 +269,8 @@ def cmd_doctor(_args) -> int:
          "found" if have_ffmpeg() else "missing - stereo calls won't be split per speaker"),
         ("Service tracker", settings.servicetracker_configured,
          settings.servicetracker_exec_url or "not connected - no work order matching"),
+        ("Winter services", settings.winter_configured,
+         settings.winter_exec_url or "not connected - no winter quote matching"),
         ("Transcription engine", True,
          f"{settings.transcription_engine}"
          + ("" if settings.transcription_engine != "assemblyai"
@@ -310,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         func=cmd_google_auth
     )
     sub.add_parser(
-        "sync-tickets", help="pull open work orders from the service tracker"
+        "sync-work", help="pull open work orders and winter quotes from the shop apps"
     ).set_defaults(func=cmd_sync_tickets)
 
     p = sub.add_parser("intake", help="process a counter recording into a draft")

@@ -141,6 +141,13 @@ WORK_ORDER_CATEGORIES = frozenset(
 NO_PROFILE_CATEGORIES = frozenset({CallCategory.spam, CallCategory.internal})
 
 
+class WorkSystem(enum.StrEnum):
+    """Which shop app owns a work item."""
+
+    servicetracker = "servicetracker"   # QuestWS/servicetracker — repair jobs
+    winter = "winter"                   # QuestWS/winter-quotes — winter services
+
+
 class NoteStatus(enum.StrEnum):
     pending = "pending"      # staged, waiting for a human to approve the push
     pushed = "pushed"
@@ -456,19 +463,34 @@ class SyncState(Base):
 # --------------------------------------------------------------------------- #
 # service tracker bridge
 # --------------------------------------------------------------------------- #
-class ServiceTicket(Base):
-    """A local mirror of a job in the service tracker.
+class WorkItem(Base):
+    """A local mirror of something open on a customer: a repair job in the
+    service tracker, or a winter services quote.
 
-    Read-only as far as these columns go: the service tracker owns this data
-    and the CRM re-reads it on every sync. It exists here so a call can be
-    matched to a work order without a network round trip, and so tickets stay
-    visible on a contact page when the shop app is unreachable.
+    Read-only as far as these columns go — the owning app is the source of
+    truth and the CRM re-reads on every sync. It exists here so a call can be
+    matched without a network round trip, and so open work stays visible on a
+    contact page when the shop apps are unreachable.
+
+    The table is still called `service_tickets`: it was named when work orders
+    were the only kind, and `interactions.ticket_id` carries a foreign key to
+    it. Renaming would buy tidier SQL at the price of a migration that has to
+    rebuild that reference, which is not a trade worth making.
     """
 
     __tablename__ = "service_tickets"
+    __table_args__ = (
+        UniqueConstraint("system", "remote_id", name="uq_work_item_remote"),
+    )
 
-    # The BiT invoice number, which is the job id over there.
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # "<system>:<remote id>" — the two apps number independently, so the ids
+    # are namespaced rather than trusted not to collide.
+    id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    system: Mapped[WorkSystem] = mapped_column(
+        Enum(WorkSystem), default=WorkSystem.servicetracker, index=True
+    )
+    # What the owning app calls it: a BiT invoice number, or a quote number.
+    remote_id: Mapped[str] = mapped_column(String(64), index=True, default="")
     contact_id: Mapped[int | None] = mapped_column(
         ForeignKey("contacts.id", ondelete="SET NULL"), index=True
     )
@@ -478,6 +500,11 @@ class ServiceTicket(Base):
     customer_email: Mapped[str | None] = mapped_column(String(320), index=True)
     boat_info: Mapped[str | None] = mapped_column(String(500))
     work_requested: Mapped[str | None] = mapped_column(Text)
+
+    # Winter-only: where the unit is stored, and whether the season is closed.
+    storage_location: Mapped[str | None] = mapped_column(String(120))
+    season_done: Mapped[str | None] = mapped_column(String(40))
+    balance: Mapped[str | None] = mapped_column(String(40))
 
     status: Mapped[str] = mapped_column(String(40), default="received")
     status_label: Mapped[str | None] = mapped_column(String(80))

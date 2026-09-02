@@ -34,6 +34,25 @@
 
 <div class="cols">
   <section>
+    {% if work_items %}
+    <h2>Open in the shop</h2>
+    <ul class="feed">
+      {% for w in work_items %}
+      <li>
+        <strong>{{ w.remote_id }}</strong>
+        <span class="pill">{{ 'winter services' if w.system.value == 'winter' else 'repair job' }}</span>
+        <span class="pill">{{ w.status_label or w.status }}</span>
+        <div class="detail">
+          {{ w.boat_info or '' }}
+          {% if w.storage_location %} &middot; stored {{ w.storage_location }}{% endif %}
+          {% if w.balance %} &middot; {{ w.balance }}{% endif %}
+        </div>
+        {% if w.work_requested %}<div class="detail">{{ w.work_requested }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
     <h2>What they need</h2>
     {% if needs %}
     <ul class="needs">

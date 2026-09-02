@@ -36,9 +36,10 @@
   pages, daily brief                      |
                                           |  listJobs / addWriterNote
                                           v
-                                  servicetracker (Apps Script /exec)
+                          servicetracker + winter-quotes
+                            (two Apps Script /exec endpoints)
                                           |
-                                    a person keys it into BiT
+                                    a person keys it in
 ```
 
 ## The data model, and why it is shaped this way
@@ -138,7 +139,7 @@ message queue would cost more to run than it saves.
 | `sync_mail` | 10 min | IMAP fetch, then analyse new messages |
 | `sync_calendar` | 15 min | Push new appointments to Google Calendar |
 | `walk_in_intakes` | 30s | Finish counter recordings orphaned by a restart |
-| `sync_tickets` | 10 min | Mirror open work orders; push notes if autopush is on |
+| `sync_work` | 10 min | Mirror both shop apps; push notes if autopush is on |
 | `daily_brief` | 07:00 | Generate the morning brief |
 
 Run it inside the web server (`crm.cli serve`) or on its own (`crm.cli worker`).

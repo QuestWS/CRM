@@ -18,6 +18,7 @@ from crm.ai.schemas import (
     ExtractedTask,
     TicketUpdate,
 )
+from crm.integrations import servicetracker
 from crm.models import (
     WORK_ORDER_CATEGORIES,
     CallCategory,
@@ -40,7 +41,7 @@ from tests.test_tickets import JOB, FakeClient
 @pytest.fixture
 def fake_client(monkeypatch):
     client = FakeClient([dict(JOB)])
-    monkeypatch.setattr(ticket_service, "get_client", lambda: client)
+    monkeypatch.setattr(servicetracker, "get_client", lambda: client)
     return client
 
 

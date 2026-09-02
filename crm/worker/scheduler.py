@@ -77,25 +77,22 @@ def job_walk_in_intakes() -> None:
         log.info("walk-in intake: %s", stats)
 
 
-def job_sync_tickets() -> None:
-    from crm.integrations.servicetracker import ServiceTrackerError
-    from crm.services.tickets import push_all_pending, sync_tickets
+def job_sync_work() -> None:
+    """Mirror open work from both shop apps. Either being down is survivable."""
+    from crm.services.tickets import push_all_pending, sync_all
 
-    if not settings.servicetracker_configured:
+    if not (settings.servicetracker_configured or settings.winter_configured):
         return
     try:
         with session_scope() as s:
-            stats = sync_tickets(s)
+            stats = sync_all(s)
         with session_scope() as s:
             pushed = push_all_pending(s)
-    except ServiceTrackerError as exc:
-        log.warning("service tracker sync skipped: %s", exc)
-        return
     except Exception:
-        log.exception("service tracker sync failed")
+        log.exception("work item sync failed")
         return
-    if any(stats.values()) or any(pushed.values()):
-        log.info("service tracker: %s, notes %s", stats, pushed)
+    if stats or any(pushed.values()):
+        log.info("work sync: %s, notes %s", stats, pushed)
 
 
 def job_daily_brief() -> None:
@@ -137,9 +134,9 @@ def build_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
     scheduler.add_job(
-        job_sync_tickets,
+        job_sync_work,
         IntervalTrigger(minutes=settings.servicetracker_sync_minutes),
-        id="sync_tickets",
+        id="sync_work",
         replace_existing=True,
     )
     scheduler.add_job(

@@ -1,23 +1,38 @@
-# Talking to the service tracker
+# Talking to the shop apps
 
-The CRM knows what customers say. `QuestWS/servicetracker` knows what work is
-open on the floor. This connects them without either one having to change how
-it works.
+The CRM knows what customers say. Two other systems know what is open on them:
+
+* **`QuestWS/servicetracker`** — repair jobs on the floor.
+* **`QuestWS/winter-quotes_26-27`** — winter services quotes, storage and
+  season close-out.
+
+This connects both without either one having to change how it works.
 
 ## What crosses the wire
 
 ```
    servicetracker (Apps Script /exec)
-        │  listJobs          ─────▶  ServiceTicket mirror, linked to contacts
-        │
-        ◀── addWriterNote    ─────   a staged note, after somebody clicks send
+        │  listJobs           ────▶  WorkItem mirror, linked to contacts
+        ◀── addWriterNote     ────   a staged note, after somebody clicks send
+
+   winter-quotes (Apps Script /exec)
+        │  storageView + lookup ──▶  WorkItem mirror, linked to contacts
+        ◀── staffNote         ────   a staged note, after somebody clicks send
 ```
 
-That is the whole surface. Two calls, one each way.
+Four calls in, two out. Both mirrors land in the same `WorkItem` table with a
+`system` discriminator, so matching, staging, approval and pushing are one
+mechanism rather than two near-copies.
 
-## Rules carried over from that repo
+Ids are namespaced — `servicetracker:WO-10432`, `winter:QW-26-1255` — because
+the two apps number independently and "they probably won't collide" is not a
+guarantee worth building on.
+
+## Rules carried over from those repos
 
 These are not optional — they are the reason this integration is safe to add.
+
+### From the service tracker
 
 **BiT is never integrated with.** A job id *is* a BiT invoice number, so the CRM
 cannot create a job. Walk-in intake produces a draft that a person keys into
@@ -29,9 +44,33 @@ returns `customer_note` and nothing else, so a `writer_note` cannot surface to a
 customer even if the tracking page is switched back on. The CRM's write path is
 inside that boundary by construction, not by remembering to stay there.
 
-**Nothing leaves on a timer.** Staged notes wait for a click, matching the
-shop's rule that the invoice email only goes when a writer presses send.
-`SERVICETRACKER_AUTOPUSH=true` exists if you decide otherwise; it is off.
+### From the winter system
+
+**Never send email to a customer.** That repo's §4b is explicit: every email is
+a human-clicked action by Quest staff. So the winter client wraps *no* send
+function at all — not `sendEmail`, not `bulkSend`, not even the preview. A
+capability that is not there cannot be called by mistake, and there is a test
+asserting the client's public surface contains nothing matching "send" or
+"email".
+
+**Treat the sheet as read-only** unless the task is to change a named quote.
+The only write is `staffNote`, against a quote number a person approved.
+
+**The staff note replaces, it does not append.** So a push reads the existing
+note first and adds underneath it. Losing what a staff member typed by hand
+because a call came in afterwards would be far worse than a note that runs long
+— and a note already present is detected and skipped rather than duplicated.
+
+**Never put customer PII in the repo.** Nothing here logs a name, phone or
+email; quotes are identified by number in every log line, and the tests use
+invented people.
+
+### Both
+
+**Nothing leaves on a timer.** Staged notes wait for a click, matching both
+shops' rule that customer-facing mail only goes when a person presses send.
+`SERVICETRACKER_AUTOPUSH=true` covers both systems if you decide otherwise; it
+is off.
 
 ## Setup
 
@@ -41,17 +80,27 @@ SERVICETRACKER_EXEC_URL=https://script.google.com/macros/s/AKfy…/exec
 SERVICETRACKER_PASSWORD=<the ADMIN_PASSWORD script property over there>
 SERVICETRACKER_SYNC_MINUTES=10
 SERVICETRACKER_AUTOPUSH=false
+
+WINTER_EXEC_URL=https://script.google.com/macros/s/AKfy…/exec
+WINTER_PIN=<a staff console PIN with the "keys" permission>
 ```
 
-The `/exec` URL is the one in the service tracker's `assets/lib/config.js` —
-the same one the four pages use. Do not mint a new deployment to get one; that
-orphans every QR code already printed on paper.
+Both `/exec` URLs are the ones those apps already use — the service tracker's
+is in `assets/lib/config.js`, the winter system's is `API_URL` in
+`admin/index.html`. Do not mint a new deployment to get either: the service
+tracker's orphans every QR code already printed on paper, and the winter one is
+shared by three front ends.
+
+The winter PIN needs the **`keys`** permission, which is what
+`adminSetStaffNote` requires over there. A PIN with only `view` will sync fine
+and fail on push with a clear message.
 
 ```bash
-python -m crm.cli sync-tickets   # pull open jobs, link them to contacts
+python -m crm.cli sync-work   # pull open jobs and quotes, link them to contacts
 ```
 
-Then open `/tickets`.
+Then open `/tickets`. Either system being unconfigured or down is survivable —
+`sync_all` reports per-system and the other still runs.
 
 ## How a call finds its work order
 
@@ -87,6 +136,21 @@ This changes the work — needs re-keying into BiT.
 
 The provenance line is there because a mechanic reading it needs to know this is
 the customer's word relayed, not something someone saw on the boat.
+
+## The winter system's shape, and what it costs
+
+`storageView` is one call for the whole season, but it carries no phone or
+email — so contact details need a per-quote `lookup`. A first sync therefore
+backfills a bounded number per run (25) and links progressively over a few
+passes, rather than firing hundreds of Apps Script calls at once. Quotes
+already carrying contact details are never looked up again.
+
+A quote is **open until the season is closed out on it**, not until it is paid.
+A boat that is paid for and still sitting in the yard is very much open, and
+`seasonDone` is the field that says otherwise.
+
+Names come back as `"Last, First"` from `storageView` and are turned round on
+the way in, so they match how a contact is stored.
 
 ## Walk-in intake
 

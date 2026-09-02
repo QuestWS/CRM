@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     # nothing leaves on a timer; keep it that way unless asked otherwise.
     servicetracker_autopush: bool = Field(False, alias="SERVICETRACKER_AUTOPUSH")
 
+    # --- winter services (QuestWS/winter-quotes_26-27) ---
+    # Its staff console API. The PIN needs the 'keys' permission to add notes.
+    winter_exec_url: str = Field("", alias="WINTER_EXEC_URL")
+    winter_pin: str = Field("", alias="WINTER_PIN")
+
     # --- google (calendar only) ---
     google_client_secret_file: Path = Field(
         REPO_ROOT / ".credentials/client_secret.json", alias="GOOGLE_CLIENT_SECRET_FILE"
@@ -161,6 +166,10 @@ class Settings(BaseSettings):
     def business_line_list(self) -> list[str]:
         raw = self.business_lines.replace("\n", ";")
         return [line.strip() for line in raw.split(";") if line.strip()]
+
+    @property
+    def winter_configured(self) -> bool:
+        return bool(self.winter_exec_url and self.winter_pin)
 
     @property
     def servicetracker_configured(self) -> bool:

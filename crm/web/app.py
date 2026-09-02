@@ -42,11 +42,11 @@ from crm.models import (
     NeedStatus,
     NoteStatus,
     Recording,
-    ServiceTicket,
     Task,
     TaskStatus,
     TicketNote,
     WalkInIntake,
+    WorkItem,
     utcnow,
 )
 from crm.services import briefing
@@ -190,6 +190,7 @@ def contact_detail(contact_id: int, request: Request, s: Session = Depends(get_s
                 .order_by(Appointment.starts_at.desc())
             )
         ),
+        work_items=ticket_service.open_tickets_for(s, contact),
     )
 
 
@@ -610,7 +611,7 @@ def intake_link(
         raise HTTPException(400, "Enter the work order number.")
     record.linked_ticket_id = job_id
     record.status = IntakeStatus.linked
-    if record.interaction_id and s.get(ServiceTicket, job_id):
+    if record.interaction_id and s.get(WorkItem, job_id):
         interaction = s.get(Interaction, record.interaction_id)
         if interaction is not None:
             interaction.ticket_id = job_id
@@ -635,29 +636,32 @@ def intake_discard(intake_id: int, s: Session = Depends(get_session)):
 def ticket_page(request: Request, s: Session = Depends(get_session)):
     tickets = list(
         s.scalars(
-            select(ServiceTicket)
-            .where(ServiceTicket.is_open.is_(True))
-            .order_by(ServiceTicket.remote_updated_at.desc())
+            select(WorkItem)
+            .where(WorkItem.is_open.is_(True))
+            .order_by(WorkItem.system, WorkItem.remote_updated_at.desc())
         )
     )
+    grouped: dict[str, list[WorkItem]] = {}
+    for item in tickets:
+        grouped.setdefault(item.system.value, []).append(item)
     return render(
         request,
         "tickets.html",
-        tickets=tickets,
+        grouped=grouped,
         notes=ticket_service.pending_notes(s),
-        configured=settings.servicetracker_configured,
+        configured=(
+            settings.servicetracker_configured or settings.winter_configured
+        ),
     )
 
 
 @app.post("/tickets/sync")
 def ticket_sync(s: Session = Depends(get_session)):
-    from crm.integrations.servicetracker import ServiceTrackerError
-
-    try:
-        ticket_service.sync_tickets(s)
-    except ServiceTrackerError as exc:
-        raise HTTPException(502, str(exc)) from exc
+    stats = ticket_service.sync_all(s)
     s.commit()
+    failures = {k: v["error"] for k, v in stats.items() if "error" in v}
+    if failures and len(failures) == len(stats):
+        raise HTTPException(502, "; ".join(f"{k}: {v}" for k, v in failures.items()))
     return RedirectResponse("/tickets", status_code=303)
 
 
