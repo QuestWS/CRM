@@ -72,6 +72,30 @@ class ExtractedAppointment(BaseModel):
     )
 
 
+class TicketUpdate(BaseModel):
+    """Something said about a work order that is already open in the shop."""
+
+    ticket_id: str = Field(
+        description="The work order number, copied exactly from the open-tickets "
+        "list you were given. Never invent one."
+    )
+    note: str = Field(
+        description="The note for the shop's job log. Write it for a mechanic or "
+        "service writer who was not on the call: what the customer said, and what "
+        "it changes. Lead with the change if there is one."
+    )
+    changes_the_work: bool = Field(
+        False,
+        description="True if they added, removed, changed or cancelled work, or "
+        "authorised a cost. These get re-keyed into BiT, so be precise.",
+    )
+    needs_writer_attention: bool = Field(
+        False,
+        description="True if somebody in the office has to act before the boat "
+        "can move - an approval, a decision, a callback they are waiting on.",
+    )
+
+
 class ConversationAnalysis(BaseModel):
     """What one call or email yields."""
 
@@ -88,6 +112,12 @@ class ConversationAnalysis(BaseModel):
     )
     missed_opportunity: str | None = Field(
         None, description="Something worth asking next time. Null if nothing stands out."
+    )
+    ticket_updates: list[TicketUpdate] = Field(
+        default=[],
+        description="One entry per open work order this conversation actually "
+        "concerned. Empty when the call had nothing to do with a job in the shop - "
+        "most calls do not. Never guess a ticket from the customer's name alone.",
     )
 
 
@@ -111,4 +141,52 @@ class DailyBrief(BaseModel):
     waiting_on_others: list[str] = []
     at_risk: list[str] = Field(
         default=[], description="People or deals going cold, and why it matters."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# walk-in intake
+# --------------------------------------------------------------------------- #
+class RequestedWork(BaseModel):
+    description: str = Field(
+        description="One job, phrased the way it would read on a work order."
+    )
+    customer_words: str | None = Field(
+        None, description="How they described the symptom, if it differs usefully."
+    )
+    urgency: Urgency = "normal"
+
+
+class WalkInIntakeExtraction(BaseModel):
+    """A customer at the counter dropping a boat off."""
+
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    customer_email: str | None = None
+    boat_info: str | None = Field(
+        None,
+        description="Year, make, model, length, engine, hull or registration "
+        "number - whatever was actually said. Null if nothing was.",
+    )
+    requested_items: list[RequestedWork] = Field(
+        default=[], description="Each distinct job they asked for."
+    )
+    work_requested: str = Field(
+        description="The whole request as one block, ready to key into a work "
+        "order. Plain sentences, no headings."
+    )
+    urgency: Urgency = "normal"
+    promised_date: str | None = Field(
+        None, description="Any date or deadline mentioned, in their words."
+    )
+    customer_said: list[str] = Field(
+        default=[],
+        description="Personal details worth remembering - a trip they are "
+        "planning, how they use the boat, who else runs it. Not the work itself.",
+    )
+    open_questions: list[str] = Field(
+        default=[],
+        description="What the service writer still needs to ask before this can "
+        "be written up. Missing phone number, unclear symptom, no authorisation "
+        "limit. Empty if the intake is complete.",
     )

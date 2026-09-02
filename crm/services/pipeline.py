@@ -22,6 +22,7 @@ from crm.models import (
     utcnow,
 )
 from crm.services import profile as profile_service
+from crm.services import tickets as ticket_service
 from crm.services.identity import resolve_contact
 from crm.transcription.registry import transcribe_call
 
@@ -32,6 +33,23 @@ MAX_ATTEMPTS = 3
 
 class PipelineError(RuntimeError):
     pass
+
+
+def _context_with_tickets(s: Session, contact) -> str:
+    """Everything on file, plus the person's open work orders in the shop."""
+    parts = [profile_service.known_context_block(s, contact)]
+    tickets = ticket_service.tickets_context_block(s, contact)
+    if tickets:
+        parts.append(tickets)
+    return "\n\n".join(p for p in parts if p)
+
+
+def _stage_ticket_notes(s: Session, interaction: Interaction, analysis) -> None:
+    """Never let a service-tracker problem cost us a completed analysis."""
+    try:
+        ticket_service.stage_notes(s, interaction, analysis)
+    except Exception:
+        log.exception("could not stage ticket notes for interaction %s", interaction.id)
 
 
 # --------------------------------------------------------------------------- #
@@ -128,7 +146,7 @@ def analyze_recording(s: Session, rec: Recording) -> Interaction:
             kind="phone call",
             direction=(rec.direction or Direction.unknown).value,
             occurred_at=interaction.occurred_at,
-            known_context=profile_service.known_context_block(s, contact),
+            known_context=_context_with_tickets(s, contact),
             from_number=rec.from_number,
             to_number=rec.to_number,
             duration_seconds=interaction.duration_seconds,
@@ -142,6 +160,7 @@ def analyze_recording(s: Session, rec: Recording) -> Interaction:
         raise PipelineError(str(exc)) from exc
 
     profile_service.apply_analysis(s, contact, interaction, analysis)
+    _stage_ticket_notes(s, interaction, analysis)
     profile_service.refresh_profile(s, contact)
 
     rec.status = RecordingStatus.done
@@ -214,9 +233,10 @@ def process_email_interaction(s: Session, interaction: Interaction) -> Interacti
         direction=interaction.direction.value,
         occurred_at=interaction.occurred_at,
         subject=interaction.subject,
-        known_context=profile_service.known_context_block(s, contact),
+        known_context=_context_with_tickets(s, contact),
     )
     profile_service.apply_analysis(s, contact, interaction, analysis)
+    _stage_ticket_notes(s, interaction, analysis)
     profile_service.refresh_profile(s, contact)
     return interaction
 

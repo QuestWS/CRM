@@ -67,6 +67,37 @@ def job_sync_calendar() -> None:
         log.info("calendar sync: %s", stats)
 
 
+def job_walk_in_intakes() -> None:
+    """Pick up counter recordings orphaned by a restart mid-transcription."""
+    from crm.services.intake import run_pending
+
+    with session_scope() as s:
+        stats = run_pending(s)
+    if any(stats.values()):
+        log.info("walk-in intake: %s", stats)
+
+
+def job_sync_tickets() -> None:
+    from crm.integrations.servicetracker import ServiceTrackerError
+    from crm.services.tickets import push_all_pending, sync_tickets
+
+    if not settings.servicetracker_configured:
+        return
+    try:
+        with session_scope() as s:
+            stats = sync_tickets(s)
+        with session_scope() as s:
+            pushed = push_all_pending(s)
+    except ServiceTrackerError as exc:
+        log.warning("service tracker sync skipped: %s", exc)
+        return
+    except Exception:
+        log.exception("service tracker sync failed")
+        return
+    if any(stats.values()) or any(pushed.values()):
+        log.info("service tracker: %s, notes %s", stats, pushed)
+
+
 def job_daily_brief() -> None:
     from crm.services.briefing import generate_brief
 
@@ -97,6 +128,18 @@ def build_scheduler() -> BackgroundScheduler:
         job_sync_calendar,
         IntervalTrigger(minutes=15),
         id="sync_calendar",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_walk_in_intakes,
+        IntervalTrigger(seconds=max(settings.pipeline_poll_seconds, 30)),
+        id="walk_in_intakes",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_sync_tickets,
+        IntervalTrigger(minutes=settings.servicetracker_sync_minutes),
+        id="sync_tickets",
         replace_existing=True,
     )
     scheduler.add_job(

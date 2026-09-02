@@ -22,6 +22,10 @@ def get_transcriber(engine: str | None = None) -> Transcriber:
         from crm.transcription.local_whisper import FasterWhisperTranscriber
 
         return FasterWhisperTranscriber()
+    if engine == "assemblyai":
+        from crm.transcription.assemblyai import AssemblyAITranscriber
+
+        return AssemblyAITranscriber()
     if engine == "deepgram":
         from crm.transcription.deepgram import DeepgramTranscriber
 

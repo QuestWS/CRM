@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     operator_email: str = Field("", alias="OPERATOR_EMAIL")
     operator_aliases: str = Field("", alias="OPERATOR_ALIASES")  # comma separated
     operator_numbers: str = Field("", alias="OPERATOR_NUMBERS")  # comma separated
-    default_region: str = Field("CA", alias="DEFAULT_REGION")  # for phone parsing
-    timezone: str = Field("America/Toronto", alias="TIMEZONE")
+    default_region: str = Field("US", alias="DEFAULT_REGION")  # for phone parsing
+    timezone: str = Field("America/Chicago", alias="TIMEZONE")
 
     # --- storage ---
     database_url: str = Field("sqlite:///./data/crm.db", alias="DATABASE_URL")
@@ -45,9 +45,16 @@ class Settings(BaseSettings):
     whisper_compute_type: str = Field("int8", alias="WHISPER_COMPUTE_TYPE")
     split_stereo_channels: bool = Field(True, alias="SPLIT_STEREO_CHANNELS")
     deepgram_api_key: str = Field("", alias="DEEPGRAM_API_KEY")
+    # The shop already transcribes mechanic voice notes with AssemblyAI, so the
+    # same key and the same vendor cover the CRM's calls too.
+    assemblyai_api_key: str = Field("", alias="ASSEMBLYAI_API_KEY")
 
     # --- sangoma / pbx ingest ---
     sangoma_webhook_secret: str = Field("", alias="SANGOMA_WEBHOOK_SECRET")
+    # The mobile app's Upload URL cannot send custom auth headers, so the secret
+    # lives in the path instead: /api/app/<token>/recording
+    app_upload_token: str = Field("", alias="APP_UPLOAD_TOKEN")
+    app_upload_max_mb: int = Field(200, alias="APP_UPLOAD_MAX_MB")
     sangoma_watch_dir: Path | None = Field(None, alias="SANGOMA_WATCH_DIR")
     sangoma_api_base: str = Field("", alias="SANGOMA_API_BASE")
     sangoma_client_id: str = Field("", alias="SANGOMA_CLIENT_ID")
@@ -63,6 +70,16 @@ class Settings(BaseSettings):
     imap_folders: str = Field("", alias="IMAP_FOLDERS")
     imap_backfill_days: int = Field(30, alias="IMAP_BACKFILL_DAYS")
     imap_max_per_sync: int = Field(200, alias="IMAP_MAX_PER_SYNC")
+
+    # --- service tracker (QuestWS/servicetracker) ---
+    # The shop's work-order app. One Apps Script /exec endpoint; the CRM is
+    # just another client of it. Never talks to BiT - same rule as over there.
+    servicetracker_exec_url: str = Field("", alias="SERVICETRACKER_EXEC_URL")
+    servicetracker_password: str = Field("", alias="SERVICETRACKER_PASSWORD")
+    servicetracker_sync_minutes: int = Field(10, alias="SERVICETRACKER_SYNC_MINUTES")
+    # Staged notes wait for a click by default. The shop's culture is that
+    # nothing leaves on a timer; keep it that way unless asked otherwise.
+    servicetracker_autopush: bool = Field(False, alias="SERVICETRACKER_AUTOPUSH")
 
     # --- google (calendar only) ---
     google_client_secret_file: Path = Field(
@@ -130,6 +147,10 @@ class Settings(BaseSettings):
             if addr and "@" in addr:
                 seen[addr] = None
         return list(seen)
+
+    @property
+    def servicetracker_configured(self) -> bool:
+        return bool(self.servicetracker_exec_url and self.servicetracker_password)
 
     @property
     def imap_folder_list(self) -> list[str]:

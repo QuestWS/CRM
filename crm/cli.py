@@ -136,6 +136,48 @@ def cmd_check_mail(_args) -> int:
     return 0
 
 
+def cmd_sync_tickets(_args) -> int:
+    from crm.integrations.servicetracker import ServiceTrackerError
+    from crm.services.tickets import pending_notes, sync_tickets
+
+    try:
+        with session_scope() as s:
+            stats = sync_tickets(s)
+            waiting = len(pending_notes(s))
+    except ServiceTrackerError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"{stats['created']} new, {stats['updated']} updated, "
+          f"{stats['linked']} linked to contacts")
+    if waiting:
+        print(f"{waiting} note(s) staged for job logs — review them at /tickets")
+    return 0
+
+
+def cmd_intake(args) -> int:
+    """Process a counter recording from a file, for testing without a browser."""
+    from crm.ingest.sangoma import register_recording
+    from crm.models import Direction
+    from crm.services.intake import create_intake, process_intake, work_order_text
+
+    with session_scope() as s:
+        recording, _ = register_recording(
+            s, Path(args.path), direction=Direction.internal
+        )
+        record = create_intake(s, recording, taken_by=args.taken_by)
+        s.commit()
+        result = process_intake(s, record)
+        if result.error:
+            print(f"Stopped: {result.error}", file=sys.stderr)
+            return 1
+        print(work_order_text(result))
+        if result.open_questions:
+            print("\nStill to ask:")
+            for question in result.open_questions:
+                print(f"  - {question}")
+    return 0
+
+
 def cmd_google_auth(_args) -> int:
     from crm.ingest.google_auth import GoogleNotConfigured, authorize_interactive
 
@@ -212,6 +254,12 @@ def cmd_doctor(_args) -> int:
          "authorised" if google_ready() else "run: python -m crm.cli google-auth"),
         ("ffmpeg", have_ffmpeg(),
          "found" if have_ffmpeg() else "missing - stereo calls won't be split per speaker"),
+        ("Service tracker", settings.servicetracker_configured,
+         settings.servicetracker_exec_url or "not connected - no work order matching"),
+        ("Transcription engine", True,
+         f"{settings.transcription_engine}"
+         + ("" if settings.transcription_engine != "assemblyai"
+            or settings.assemblyai_api_key else " (ASSEMBLYAI_API_KEY missing)")),
         ("Recording watch folder", bool(settings.sangoma_watch_dir),
          str(settings.sangoma_watch_dir) if settings.sangoma_watch_dir
          else "not set - webhook and manual upload still work"),
@@ -261,6 +309,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("google-auth", help="authorise Google Calendar").set_defaults(
         func=cmd_google_auth
     )
+    sub.add_parser(
+        "sync-tickets", help="pull open work orders from the service tracker"
+    ).set_defaults(func=cmd_sync_tickets)
+
+    p = sub.add_parser("intake", help="process a counter recording into a draft")
+    p.add_argument("path")
+    p.add_argument("--taken-by")
+    p.set_defaults(func=cmd_intake)
 
     p = sub.add_parser("brief", help="print the daily brief")
     p.add_argument("--raw", action="store_true", help="show the context, not the brief")

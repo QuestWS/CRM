@@ -5,8 +5,18 @@ import datetime as dt
 import logging
 
 from crm.ai.client import ClaudeClient, get_client
-from crm.ai.prompts import BRIEF_WRITER, PROFILE_WRITER, conversation_system
-from crm.ai.schemas import ConversationAnalysis, DailyBrief, ProfileNarrative
+from crm.ai.prompts import (
+    BRIEF_WRITER,
+    PROFILE_WRITER,
+    conversation_system,
+    intake_system,
+)
+from crm.ai.schemas import (
+    ConversationAnalysis,
+    DailyBrief,
+    ProfileNarrative,
+    WalkInIntakeExtraction,
+)
 from crm.config import settings
 
 log = logging.getLogger(__name__)
@@ -113,4 +123,41 @@ def write_brief(*, context_block: str, client: ClaudeClient | None = None) -> Da
         prompt=context_block,
         schema=DailyBrief,
         max_tokens=4000,
+    )
+
+
+def extract_walk_in(
+    *,
+    transcript: str,
+    taken_at: dt.datetime,
+    known_context: str = "",
+    client: ClaudeClient | None = None,
+) -> WalkInIntakeExtraction:
+    """A counter recording in, a draft work order out."""
+    if len(transcript) > MAX_TRANSCRIPT_CHARS:
+        raise TranscriptTooLong(
+            f"Intake recording is {len(transcript):,} characters, over the "
+            f"{MAX_TRANSCRIPT_CHARS:,} limit."
+        )
+
+    client = client or get_client()
+    parts = []
+    if known_context.strip():
+        parts += [
+            "<already_on_file>",
+            "What the CRM already knows about this customer. Use it to fill gaps "
+            "the recording leaves - but only where the recording does not "
+            "contradict it.",
+            known_context.strip(),
+            "</already_on_file>",
+            "",
+        ]
+    parts += ["<counter_recording>", transcript.strip(), "</counter_recording>"]
+
+    return client.structured(
+        system=intake_system(
+            timezone=settings.timezone, taken_at=taken_at.isoformat()
+        ),
+        prompt="\n".join(parts),
+        schema=WalkInIntakeExtraction,
     )

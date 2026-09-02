@@ -1,13 +1,13 @@
 # How it fits together
 
 ```
-  Sangoma PBX                    IMAP mailbox              Google Calendar
-  (records + announces)          (inbox + sent)                   ^
-        |                              |                          |
-        | webhook / folder / upload    | poll every 10 min        | push appointments
-        v                              v                          |
+  Sangoma app / PBX      IMAP mailbox    counter mic     Google Calendar
+  (records+announces)    (inbox+sent)    (/intake)              ^
+        |                     |               |                 |
+        | upload/webhook      | every 10 min  | record button   | appointments
+        v                     v               v                 |
   +-----------------------------------------------------------------------+
-  |  ingest/  sangoma.py    imap_mail.py    gcal.py                       |
+  |  ingest/ sangoma.py  imap_mail.py   services/intake.py    gcal.py     |
   +-----------------------------------------------------------------------+
         |                              |
         v                              v
@@ -30,8 +30,15 @@
                         v
      Contact - Fact - Need - Task - Appointment - Interaction
                         |
-                        v
-              web/  dashboard, contact pages, daily brief
+        +---------------+----------------+
+        v                                v
+  web/ dashboard, contact           services/tickets.py
+  pages, daily brief                      |
+                                          |  listJobs / addWriterNote
+                                          v
+                                  servicetracker (Apps Script /exec)
+                                          |
+                                    a person keys it into BiT
 ```
 
 ## The data model, and why it is shaped this way
@@ -111,6 +118,8 @@ message queue would cost more to run than it saves.
 | `process_calls` | 30s | Scan the watch folder, drain the recording queue |
 | `sync_mail` | 10 min | IMAP fetch, then analyse new messages |
 | `sync_calendar` | 15 min | Push new appointments to Google Calendar |
+| `walk_in_intakes` | 30s | Finish counter recordings orphaned by a restart |
+| `sync_tickets` | 10 min | Mirror open work orders; push notes if autopush is on |
 | `daily_brief` | 07:00 | Generate the morning brief |
 
 Run it inside the web server (`crm.cli serve`) or on its own (`crm.cli worker`).
@@ -130,6 +139,15 @@ schema:
 Everything else is ordinary code: deduplication, phone normalisation, identity
 resolution, scheduling. The model is used where judgement is needed and nowhere
 else, which keeps costs low and behaviour predictable.
+
+## Schema changes
+
+`create_all` creates missing tables but never alters existing ones, so
+`ensure_schema()` runs after it and adds any column a model has gained. The
+convention is the service tracker's: columns are only ever **appended**, never
+renamed, reordered or dropped, which keeps the whole migration story to one
+additive `ALTER`. A non-nullable column without a server default is logged
+rather than guessed at.
 
 ## Google Calendar setup
 

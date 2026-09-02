@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Intake {{ intake.id }}{% endblock %}
+{% block content %}
+<h1>{{ intake.customer_name or 'Unidentified customer' }}</h1>
+<div class="meta">
+  {{ intake.created_at.strftime('%a %d %b %Y, %H:%M') }}
+  {% if intake.taken_by %} &middot; taken by {{ intake.taken_by }}{% endif %}
+  &middot; <span class="pill p-{{ intake.status.value }}">{{ intake.status.value }}</span>
+  {% if contact %} &middot; <a href="/contacts/{{ contact.id }}">contact page</a>{% endif %}
+</div>
+
+{% if intake.error %}<div class="banner bad">{{ intake.error }}</div>{% endif %}
+
+{% if intake.open_questions %}
+<div class="banner">
+  <strong>Still to ask:</strong>
+  <ul>{% for q in intake.open_questions %}<li>{{ q }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<div class="cols">
+  <section>
+    <h2>Draft work order</h2>
+    <p class="muted">Key this into BiT, then note the work order number below.</p>
+    <pre class="transcript" id="wo">{{ work_order }}</pre>
+    <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('wo').textContent)">Copy</button>
+
+    <h2>Link to the work order</h2>
+    {% if intake.linked_ticket_id %}
+      <p>Written up as <strong>{{ intake.linked_ticket_id }}</strong>.</p>
+    {% else %}
+    <form method="post" action="/intake/{{ intake.id }}/link" class="inline-form">
+      <input type="text" name="ticket_id" placeholder="Invoice / WO number" required>
+      <button type="submit">Save</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/intake/{{ intake.id }}/discard" class="inline">
+      <button type="submit" class="ghost">Discard this intake</button>
+    </form>
+
+    {% if open_tickets %}
+    <h2>Their other open jobs</h2>
+    <ul class="feed">
+      {% for t in open_tickets %}
+      <li><strong>{{ t.id }}</strong> <span class="pill">{{ t.status_label or t.status }}</span>
+        <div class="detail">{{ t.boat_info or '' }}</div></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Details captured</h2>
+    <ul class="facts">
+      <li>Phone: {{ intake.customer_phone | phone or '—' }}</li>
+      <li>Email: {{ intake.customer_email or '—' }}</li>
+      <li>Boat: {{ intake.boat_info or '—' }}</li>
+      <li>Urgency: {{ intake.urgency or 'normal' }}</li>
+      <li>Promised: {{ intake.promised_date or '—' }}</li>
+    </ul>
+
+    {% if intake.customer_said %}
+    <h2>About them</h2>
+    <div class="prose">{{ intake.customer_said }}</div>
+    {% endif %}
+
+    <h2>Recording</h2>
+    <details open><summary>Transcript</summary>
+      <pre class="transcript">{{ intake.transcript or 'Not transcribed.' }}</pre>
+    </details>
+  </section>
+</div>
+{% endblock %}

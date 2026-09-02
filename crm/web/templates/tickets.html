@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Work orders{% endblock %}
+{% block content %}
+<h1>Open work orders</h1>
+
+{% if not configured %}
+<div class="banner">
+  Not connected to the service tracker. Set <code>SERVICETRACKER_EXEC_URL</code> and
+  <code>SERVICETRACKER_PASSWORD</code> in <code>.env</code>.
+</div>
+{% else %}
+<form method="post" action="/tickets/sync" class="inline">
+  <button type="submit">Sync from the service tracker</button>
+</form>
+{% endif %}
+
+{% if notes %}
+<h2>Notes waiting to go onto a job</h2>
+<p class="muted">These came out of calls and emails. Nothing reaches the shop's
+job log until you send it.</p>
+<ul class="feed">
+  {% for n in notes %}
+  <li>
+    <strong>{{ n.ticket_id }}</strong>
+    {% if n.status.value == 'failed' %}<span class="pill p-failed">failed</span>{% endif %}
+    <span class="muted">{{ n.created_at.strftime('%d %b %H:%M') }}</span>
+    <pre class="transcript">{{ n.body }}</pre>
+    {% if n.error %}<div class="detail blocked">{{ n.error }}</div>{% endif %}
+    <form method="post" action="/ticket-notes/{{ n.id }}/push" class="inline">
+      <button type="submit">Send to the job</button>
+    </form>
+    <form method="post" action="/ticket-notes/{{ n.id }}/dismiss" class="inline">
+      <button type="submit" class="ghost">Dismiss</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Jobs in the shop</h2>
+<table class="grid">
+  <thead><tr><th>WO</th><th>Customer</th><th>Boat</th><th>Status</th><th>Log</th></tr></thead>
+  <tbody>
+  {% for t in tickets %}
+    <tr>
+      <td>{{ t.id }}</td>
+      <td>{% if t.contact_id %}<a href="/contacts/{{ t.contact_id }}">{{ t.customer_name }}</a>
+          {% else %}{{ t.customer_name or '' }}{% endif %}</td>
+      <td>{{ t.boat_info or '' }}</td>
+      <td><span class="pill">{{ t.status_label or t.status }}</span>
+          {% if t.alert %}<span class="pill p-urgent">alert</span>{% endif %}</td>
+      <td class="muted">{{ t.entry_count }} entries</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">Nothing synced yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

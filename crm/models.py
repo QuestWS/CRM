@@ -85,6 +85,21 @@ class TaskStatus(enum.StrEnum):
     dismissed = "dismissed"
 
 
+class NoteStatus(enum.StrEnum):
+    pending = "pending"      # staged, waiting for a human to approve the push
+    pushed = "pushed"
+    dismissed = "dismissed"
+    failed = "failed"
+
+
+class IntakeStatus(enum.StrEnum):
+    transcribing = "transcribing"
+    draft = "draft"          # transcribed and extracted; not yet keyed into BiT
+    linked = "linked"        # a job now exists in the service tracker for it
+    discarded = "discarded"
+    failed = "failed"
+
+
 class FactCategory(enum.StrEnum):
     personal = "personal"      # kids' names, hobbies, hometown - the "know the person" half
     business = "business"      # role, company, decision authority, budget
@@ -205,6 +220,12 @@ class Interaction(Base):
     meta: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # The open work order this conversation was about, when it could be worked
+    # out. A string because service-tracker job ids are BiT invoice numbers.
+    ticket_id: Mapped[str | None] = mapped_column(
+        ForeignKey("service_tickets.id", ondelete="SET NULL"), index=True
+    )
 
     contact: Mapped[Contact | None] = relationship(back_populates="interactions")
     recording: Mapped[Recording | None] = relationship(
@@ -363,3 +384,117 @@ class SyncState(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow
     )
+
+
+# --------------------------------------------------------------------------- #
+# service tracker bridge
+# --------------------------------------------------------------------------- #
+class ServiceTicket(Base):
+    """A local mirror of a job in the service tracker.
+
+    Read-only as far as these columns go: the service tracker owns this data
+    and the CRM re-reads it on every sync. It exists here so a call can be
+    matched to a work order without a network round trip, and so tickets stay
+    visible on a contact page when the shop app is unreachable.
+    """
+
+    __tablename__ = "service_tickets"
+
+    # The BiT invoice number, which is the job id over there.
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), index=True
+    )
+
+    customer_name: Mapped[str | None] = mapped_column(String(255))
+    customer_phone: Mapped[str | None] = mapped_column(String(32), index=True)
+    customer_email: Mapped[str | None] = mapped_column(String(320), index=True)
+    boat_info: Mapped[str | None] = mapped_column(String(500))
+    work_requested: Mapped[str | None] = mapped_column(Text)
+
+    status: Mapped[str] = mapped_column(String(40), default="received")
+    status_label: Mapped[str | None] = mapped_column(String(80))
+    is_open: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    alert: Mapped[str | None] = mapped_column(Text)
+    amount_due: Mapped[float | None] = mapped_column(Float)
+    entry_count: Mapped[int] = mapped_column(Integer, default=0)
+    minutes_total: Mapped[int] = mapped_column(Integer, default=0)
+
+    remote_created_at: Mapped[str | None] = mapped_column(String(40))
+    remote_updated_at: Mapped[str | None] = mapped_column(String(40))
+    synced_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TicketNote(Base):
+    """A note staged from a conversation, waiting to be pushed onto a job.
+
+    Nothing reaches the shop's job log without a person pressing the button,
+    matching how the service tracker treats every other outbound action.
+    """
+
+    __tablename__ = "ticket_notes"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "source_interaction_id", name="uq_ticket_note_source"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(
+        ForeignKey("service_tickets.id", ondelete="CASCADE"), index=True
+    )
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL")
+    )
+    source_interaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("interactions.id", ondelete="CASCADE")
+    )
+
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[NoteStatus] = mapped_column(
+        Enum(NoteStatus), default=NoteStatus.pending, index=True
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    pushed_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+
+
+class WalkInIntake(Base):
+    """A customer standing at the counter, recorded on the way in.
+
+    Produces a draft the service writer keys into BiT - it never becomes a job
+    by itself, because a job id *is* a BiT invoice number and BiT is never
+    integrated with. Same rule the service tracker keeps.
+    """
+
+    __tablename__ = "walk_in_intakes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), index=True
+    )
+    recording_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recordings.id", ondelete="SET NULL")
+    )
+    interaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("interactions.id", ondelete="SET NULL")
+    )
+
+    customer_name: Mapped[str | None] = mapped_column(String(255))
+    customer_phone: Mapped[str | None] = mapped_column(String(32))
+    customer_email: Mapped[str | None] = mapped_column(String(320))
+    boat_info: Mapped[str | None] = mapped_column(String(500))
+    work_requested: Mapped[str | None] = mapped_column(Text)
+    requested_items: Mapped[list | None] = mapped_column(JSON, default=list)
+    urgency: Mapped[str | None] = mapped_column(String(20))
+    promised_date: Mapped[str | None] = mapped_column(String(80))
+    customer_said: Mapped[str | None] = mapped_column(Text)
+    open_questions: Mapped[list | None] = mapped_column(JSON, default=list)
+
+    transcript: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[IntakeStatus] = mapped_column(
+        Enum(IntakeStatus), default=IntakeStatus.transcribing, index=True
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+    # Set once the writer has created the matching job in BiT + service tracker.
+    linked_ticket_id: Mapped[str | None] = mapped_column(String(64))
+    taken_by: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

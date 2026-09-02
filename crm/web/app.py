@@ -32,16 +32,24 @@ from crm.models import (
     Contact,
     ContactEmail,
     ContactPhone,
+    Direction,
     Fact,
+    IntakeStatus,
     Interaction,
     Need,
     NeedStatus,
+    NoteStatus,
     Recording,
+    ServiceTicket,
     Task,
     TaskStatus,
+    TicketNote,
+    WalkInIntake,
     utcnow,
 )
 from crm.services import briefing
+from crm.services import intake as intake_service
+from crm.services import tickets as ticket_service
 from crm.services.identity import merge_contacts, pretty_phone
 
 log = logging.getLogger(__name__)
@@ -463,3 +471,172 @@ def need_status(
         need.resolved_at = utcnow()
     s.commit()
     return RedirectResponse(request.headers.get("referer", "/"), status_code=303)
+
+
+# --------------------------------------------------------------------------- #
+# walk-in intake — the record button at the counter
+# --------------------------------------------------------------------------- #
+@app.get("/intake", response_class=HTMLResponse)
+def intake_page(request: Request, s: Session = Depends(get_session)):
+    return render(request, "intake.html", intakes=intake_service.recent_intakes(s))
+
+
+def _process_intake_bg(intake_id: int) -> None:
+    with session_scope() as s:
+        intake = s.get(WalkInIntake, intake_id)
+        if intake is not None:
+            intake_service.process_intake(s, intake)
+
+
+@app.post("/api/intake")
+async def intake_upload(
+    background: BackgroundTasks,
+    file: UploadFile,
+    taken_by: str | None = Form(None),
+    s: Session = Depends(get_session),
+):
+    """Audio straight off the counter recorder."""
+    from crm.ingest.sangoma import register_recording
+
+    stamp = utcnow().strftime("%Y%m%d-%H%M%S")
+    name = Path(file.filename or f"walkin-{stamp}.webm").name
+    with tempfile.TemporaryDirectory(prefix="crm-intake-") as tmpdir:
+        staged = Path(tmpdir) / name
+        with staged.open("wb") as out:
+            shutil.copyfileobj(file.file, out)
+        if staged.stat().st_size == 0:
+            raise HTTPException(400, "The recording came through empty.")
+        recording, created = register_recording(
+            s, staged, direction=Direction.internal, call_started_at=utcnow()
+        )
+        if not created and recording.interaction_id:
+            raise HTTPException(409, "That recording has already been processed.")
+        record = intake_service.create_intake(s, recording, taken_by=taken_by)
+        s.commit()
+        intake_id = record.id
+
+    background.add_task(_process_intake_bg, intake_id)
+    return JSONResponse({"intake_id": intake_id, "status": "transcribing"})
+
+
+@app.get("/intake/{intake_id}", response_class=HTMLResponse)
+def intake_detail(intake_id: int, request: Request, s: Session = Depends(get_session)):
+    record = s.get(WalkInIntake, intake_id)
+    if record is None:
+        raise HTTPException(404, "No such intake")
+    contact = s.get(Contact, record.contact_id) if record.contact_id else None
+    return render(
+        request,
+        "intake_detail.html",
+        intake=record,
+        contact=contact,
+        work_order=intake_service.work_order_text(record),
+        open_tickets=ticket_service.open_tickets_for(s, contact),
+    )
+
+
+@app.get("/api/intake/{intake_id}")
+def intake_status(intake_id: int, s: Session = Depends(get_session)):
+    """Polled by the counter page while the draft is being written."""
+    record = s.get(WalkInIntake, intake_id)
+    if record is None:
+        raise HTTPException(404, "No such intake")
+    return {
+        "id": record.id,
+        "status": record.status.value,
+        "error": record.error,
+        "boat_info": record.boat_info,
+        "customer_name": record.customer_name,
+    }
+
+
+@app.post("/intake/{intake_id}/link")
+def intake_link(
+    intake_id: int,
+    ticket_id: str = Form(...),
+    s: Session = Depends(get_session),
+):
+    """Record which work order the writer keyed this draft into."""
+    record = s.get(WalkInIntake, intake_id)
+    if record is None:
+        raise HTTPException(404, "No such intake")
+    job_id = ticket_id.strip().upper()
+    if not job_id:
+        raise HTTPException(400, "Enter the work order number.")
+    record.linked_ticket_id = job_id
+    record.status = IntakeStatus.linked
+    if record.interaction_id and s.get(ServiceTicket, job_id):
+        interaction = s.get(Interaction, record.interaction_id)
+        if interaction is not None:
+            interaction.ticket_id = job_id
+    s.commit()
+    return RedirectResponse(f"/intake/{intake_id}", status_code=303)
+
+
+@app.post("/intake/{intake_id}/discard")
+def intake_discard(intake_id: int, s: Session = Depends(get_session)):
+    record = s.get(WalkInIntake, intake_id)
+    if record is None:
+        raise HTTPException(404, "No such intake")
+    record.status = IntakeStatus.discarded
+    s.commit()
+    return RedirectResponse("/intake", status_code=303)
+
+
+# --------------------------------------------------------------------------- #
+# service tickets
+# --------------------------------------------------------------------------- #
+@app.get("/tickets", response_class=HTMLResponse)
+def ticket_page(request: Request, s: Session = Depends(get_session)):
+    tickets = list(
+        s.scalars(
+            select(ServiceTicket)
+            .where(ServiceTicket.is_open.is_(True))
+            .order_by(ServiceTicket.remote_updated_at.desc())
+        )
+    )
+    return render(
+        request,
+        "tickets.html",
+        tickets=tickets,
+        notes=ticket_service.pending_notes(s),
+        configured=settings.servicetracker_configured,
+    )
+
+
+@app.post("/tickets/sync")
+def ticket_sync(s: Session = Depends(get_session)):
+    from crm.integrations.servicetracker import ServiceTrackerError
+
+    try:
+        ticket_service.sync_tickets(s)
+    except ServiceTrackerError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    s.commit()
+    return RedirectResponse("/tickets", status_code=303)
+
+
+@app.post("/ticket-notes/{note_id}/push")
+def ticket_note_push(note_id: int, request: Request, s: Session = Depends(get_session)):
+    from crm.integrations.servicetracker import ServiceTrackerError
+
+    note = s.get(TicketNote, note_id)
+    if note is None:
+        raise HTTPException(404, "No such note")
+    try:
+        ticket_service.push_note(s, note)
+    except ServiceTrackerError as exc:
+        s.commit()
+        raise HTTPException(502, str(exc)) from exc
+    s.commit()
+    return RedirectResponse(request.headers.get("referer", "/tickets"), status_code=303)
+
+
+@app.post("/ticket-notes/{note_id}/dismiss")
+def ticket_note_dismiss(note_id: int, request: Request, s: Session = Depends(get_session)):
+    note = s.get(TicketNote, note_id)
+    if note is None:
+        raise HTTPException(404, "No such note")
+    note.status = NoteStatus.dismissed
+    s.commit()
+    return RedirectResponse(request.headers.get("referer", "/tickets"), status_code=303)

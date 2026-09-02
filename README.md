@@ -24,18 +24,29 @@ them back.
   agreed on, pushed to Google Calendar.
 - **Writes you a brief each morning**: what to do today, what's waiting on
   others, who's going cold.
+- **Matches conversations to open work orders** in
+  [`QuestWS/servicetracker`](https://github.com/QuestWS/servicetracker), and
+  stages a note for the job log that you send with one click.
+- **Records walk-in drop-offs** at the counter and turns them into a draft work
+  order, with a list of what you still need to ask.
 
-## Before you start: the phone app
+## Before you start: Illinois is an all-party consent state
 
-**Your Sangoma phone app cannot record its own calls.** iOS gives no app access
-to call audio, and Android closed those APIs in 2019. Recording happens on the
-**PBX**, which sits in the middle of every call and already supports both
-recording and the consent announcement as built-in features.
+Recording a private conversation in Illinois requires **everyone's** consent,
+and a violation is a felony. The recording announcement is not a courtesy here —
+it is what makes the system lawful. The same applies to the counter recorder:
+you have to ask before you press it.
 
-This is better anyway: it covers every device on your account, survives a phone
-upgrade, and needs nothing installed on the phone.
+Read **[docs/privacy-and-consent.md](docs/privacy-and-consent.md)** before you
+record anything. It also covers BIPA, which treats voiceprints as biometric
+data and is a live litigation risk in Illinois.
 
-Full walkthrough: **[docs/sangoma-setup.md](docs/sangoma-setup.md)**.
+## Getting recordings in
+
+The Sangoma mobile app records SIP calls itself and can POST each recording
+straight here — that is the simplest path, and it is what
+**[docs/sangoma-setup.md](docs/sangoma-setup.md)** walks through, along with
+PBX-side recording for desk phones and the announcement that plays to callers.
 
 ## Install
 
@@ -85,6 +96,8 @@ python -m crm.cli add-call rec.wav    # process one recording
 python -m crm.cli brief               # today's brief in the terminal
 python -m crm.cli brief --raw         # what the AI was given, for debugging
 python -m crm.cli refresh-profile 12  # rewrite one contact's profile
+python -m crm.cli sync-tickets        # pull open work orders from the shop app
+python -m crm.cli intake counter.wav  # a drop-off recording -> draft work order
 ```
 
 ## The web UI
@@ -97,6 +110,8 @@ python -m crm.cli refresh-profile 12  # rewrite one contact's profile
 | **Calls** | Every recording and its processing status; upload files here |
 | **Tasks** | Everything outstanding, overdue first |
 | **Calendar** | Appointments, and one click to push them to Google |
+| **Drop-off** | The counter record button, and recent intakes |
+| **Work orders** | Open jobs from the service tracker, and notes waiting to send |
 | **Brief** | The morning brief |
 
 ## Email over IMAP
@@ -134,6 +149,18 @@ engine); **transcripts and email text go to the Anthropic API** for
 summarisation; **everything else stays in your SQLite file**. Encrypt the disk —
 it's the highest-value ten minutes of security work here — and back up
 `data/crm.db` and `media/`.
+
+## The service tracker
+
+Conversations get matched to open work orders in the shop's own app, and a note
+for the job log is staged for you to send. Nothing is created in BiT and nothing
+customer-facing is ever sent — the only write is a `writer_note`, which is
+shop-only by construction over there.
+
+The counter record button produces a draft work order you key into BiT, plus a
+timeline entry and profile facts for the customer.
+
+Setup and the rules this respects: **[docs/servicetracker-integration.md](docs/servicetracker-integration.md)**.
 
 ## How it works
 

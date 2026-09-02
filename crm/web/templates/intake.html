@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Counter intake{% endblock %}
+{% block content %}
+<h1>Boat drop-off</h1>
+<p class="muted">Press record and let the customer describe what they want done.
+Everything gets typed up into a draft work order you can key into BiT.</p>
+
+<section class="recorder-panel">
+  <div class="rec-row">
+    <button type="button" id="recBtn" class="rec">Start recording</button>
+    <span id="recTime" class="rec-time"></span>
+    <input type="text" id="takenBy" placeholder="Taken by (optional)"
+           autocomplete="off" maxlength="80">
+  </div>
+  <div id="recMsg" class="meta"></div>
+  <div id="recPreview" hidden>
+    <audio id="recAudio" controls></audio>
+    <div class="rec-row">
+      <button type="button" id="sendBtn">Write it up</button>
+      <button type="button" id="dropBtn" class="ghost">Discard</button>
+    </div>
+  </div>
+  <noscript><p class="banner">This page needs JavaScript to record.</p></noscript>
+</section>
+
+<h2>Recent intakes</h2>
+<ul class="feed">
+  {% for i in intakes %}
+  <li>
+    <a href="/intake/{{ i.id }}"><strong>{{ i.customer_name or 'Unidentified customer' }}</strong></a>
+    <span class="pill p-{{ i.status.value }}">{{ i.status.value }}</span>
+    <span class="muted">{{ i.created_at.strftime('%d %b %H:%M') }}</span>
+    {% if i.linked_ticket_id %}<span class="pill">WO {{ i.linked_ticket_id }}</span>{% endif %}
+    <div class="detail">{{ i.boat_info or '' }}{% if i.work_requested %} — {{ i.work_requested[:160] }}{% endif %}</div>
+  </li>
+  {% else %}
+  <li class="muted">Nothing recorded yet.</li>
+  {% endfor %}
+</ul>
+
+<script>
+// Same approach as the shop's mechanic app: MediaRecorder with whichever
+// container this browser actually supports, posted as a file.
+const pickMime = () => {
+  if (typeof MediaRecorder === 'undefined') return undefined;
+  return ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg']
+    .find((t) => MediaRecorder.isTypeSupported(t));
+};
+const EXT = { 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg' };
+
+let recorder = null, chunks = [], blob = null, stream = null, ticker = null, started = 0;
+const $ = (id) => document.getElementById(id);
+const msg = (text) => { $('recMsg').textContent = text || ''; };
+
+function resetTimer() { clearInterval(ticker); ticker = null; $('recTime').textContent = ''; }
+
+async function start() {
+  if (typeof MediaRecorder === 'undefined') return msg('This browser cannot record audio.');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    return msg('Microphone blocked. Allow access and try again.');
+  }
+  const mime = pickMime();
+  chunks = [];
+  recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+    stream.getTracks().forEach((t) => t.stop());
+    recorder = null; stream = null;
+    $('recAudio').src = URL.createObjectURL(blob);
+    $('recPreview').hidden = false;
+    $('recBtn').textContent = 'Start recording';
+    $('recBtn').classList.remove('on');
+    resetTimer();
+    msg('Listen back, then write it up.');
+  };
+  recorder.start();
+  started = Date.now();
+  $('recBtn').textContent = 'Stop recording';
+  $('recBtn').classList.add('on');
+  $('recPreview').hidden = true;
+  msg('Recording. Ask them to say the boat and what they want done.');
+  ticker = setInterval(() => {
+    const s = Math.floor((Date.now() - started) / 1000);
+    $('recTime').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }, 500);
+}
+
+$('recBtn').addEventListener('click', () => (recorder ? recorder.stop() : start()));
+$('dropBtn').addEventListener('click', () => {
+  blob = null; $('recPreview').hidden = true; msg('Discarded.');
+});
+
+$('sendBtn').addEventListener('click', async () => {
+  if (!blob) return;
+  $('sendBtn').disabled = true;
+  msg('Uploading…');
+  const ext = EXT[(blob.type || '').split(';')[0]] || 'webm';
+  const form = new FormData();
+  form.append('file', blob, `walkin-${Date.now()}.${ext}`);
+  form.append('taken_by', $('takenBy').value || '');
+  let id;
+  try {
+    const res = await fetch('/api/intake', { method: 'POST', body: form });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    id = (await res.json()).intake_id;
+  } catch (err) {
+    $('sendBtn').disabled = false;
+    return msg(`Upload failed: ${err.message}. The recording is still here — try again.`);
+  }
+  msg('Transcribing and writing it up…');
+  // Poll rather than block: transcription of a long counter conversation can
+  // run past any sensible request timeout.
+  const poll = setInterval(async () => {
+    try {
+      const state = await (await fetch(`/api/intake/${id}`)).json();
+      if (state.status === 'transcribing') return;
+      clearInterval(poll);
+      window.location = `/intake/${id}`;
+    } catch (err) { /* keep polling; a blip is not a failure */ }
+  }, 2500);
+});
+</script>
+{% endblock %}

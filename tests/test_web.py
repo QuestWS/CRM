@@ -31,7 +31,9 @@ def client():
 
 
 @pytest.mark.parametrize(
-    "path", ["/", "/contacts", "/calls", "/tasks", "/calendar", "/api/health"]
+    "path",
+    ["/", "/contacts", "/calls", "/tasks", "/calendar", "/intake", "/tickets",
+     "/api/health"],
 )
 def test_pages_render(client, path):
     resp = client.get(path)
@@ -78,3 +80,65 @@ def test_webhook_needs_an_actual_recording(client, monkeypatch):
     resp = client.post("/api/sangoma/recording", json={"src": "6135551234"})
     assert resp.status_code == 400
     assert "recording" in resp.json()["detail"]
+
+
+def test_intake_upload_rejects_an_empty_recording(client):
+    resp = client.post("/api/intake", files={"file": ("x.webm", b"", "audio/webm")})
+    assert resp.status_code == 400
+
+
+def test_missing_intake_is_404(client):
+    assert client.get("/intake/999999").status_code == 404
+    assert client.get("/api/intake/999999").status_code == 404
+
+
+def test_intake_upload_accepts_a_recording(client, monkeypatch):
+    """Exercises the real upload path - a NameError here is a 500, not a 400."""
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as fh:
+        fh.setnchannels(1)
+        fh.setsampwidth(2)
+        fh.setframerate(8000)
+        fh.writeframes(b"\x00\x00" * 4000)
+
+    from crm.web import app as web
+
+    monkeypatch.setattr(web.BackgroundTasks, "add_task", lambda self, *a, **k: None)
+    resp = client.post(
+        "/api/intake",
+        files={"file": ("walkin-test.wav", buf.getvalue(), "audio/wav")},
+        data={"taken_by": "Sam"},
+    )
+    assert resp.status_code == 200, resp.text[:300]
+    body = resp.json()
+    assert body["status"] == "transcribing"
+    assert client.get(f"/api/intake/{body['intake_id']}").status_code == 200
+
+
+def test_ensure_schema_adds_a_missing_column(tmp_path):
+    """create_all never alters an existing table; ensure_schema is what does."""
+    import sqlalchemy as sa
+
+    db = tmp_path / "old.db"
+    engine = sa.create_engine(f"sqlite:///{db}")
+    # A table shaped like an older release: no ticket_id.
+    with engine.begin() as conn:
+        conn.execute(sa.text(
+            "CREATE TABLE interactions (id INTEGER PRIMARY KEY, kind VARCHAR)"
+        ))
+
+    import crm.db as db_module
+
+    original = db_module.engine
+    db_module.engine = engine
+    try:
+        db_module.ensure_schema()
+    finally:
+        db_module.engine = original
+
+    columns = {c["name"] for c in sa.inspect(engine).get_columns("interactions")}
+    assert "ticket_id" in columns
+    assert "summary" in columns
