@@ -136,6 +136,43 @@ def cmd_check_mail(_args) -> int:
     return 0
 
 
+def cmd_espo_check(_args) -> int:
+    """Confirm the URL, the key and the API user's access in one call."""
+    from crm.integrations.espocrm import EspoError, EspoNotConfigured
+    from crm.services.espo_sync import check
+
+    try:
+        with session_scope() as s:
+            info = check(s)
+    except (EspoError, EspoNotConfigured) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(f"Connected to {info['url']} as {info['user'] or '(unknown user)'}")
+    print(f"Email watermark: {info['watermark']}\n")
+    for entity, count in info["counts"].items():
+        print(f"  {entity:<10} {count}")
+    return 0
+
+
+def cmd_espo_sync(args) -> int:
+    from crm.integrations.espocrm import EspoError, EspoNotConfigured
+    from crm.services.espo_sync import sync_emails
+
+    try:
+        with session_scope() as s:
+            stats = sync_emails(s, limit=args.limit)
+    except (EspoError, EspoNotConfigured) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(
+        f"{stats['seen']} email(s) since the watermark: "
+        f"{stats['analysed']} analysed, {stats['skipped']} skipped, "
+        f"{stats['failed']} failed"
+    )
+    return 1 if stats["failed"] and not stats["analysed"] else 0
+
+
 def cmd_sync_tickets(_args) -> int:
     from crm.services.tickets import pending_notes, sync_all
 
@@ -267,6 +304,8 @@ def cmd_doctor(_args) -> int:
          "authorised" if google_ready() else "run: python -m crm.cli google-auth"),
         ("ffmpeg", have_ffmpeg(),
          "found" if have_ffmpeg() else "missing - stereo calls won't be split per speaker"),
+        ("EspoCRM", settings.espo_configured,
+         settings.espo_url or "not connected - set ESPO_URL and ESPO_API_KEY"),
         ("Service tracker", settings.servicetracker_configured,
          settings.servicetracker_exec_url or "not connected - no work order matching"),
         ("Winter services", settings.winter_configured,
@@ -324,6 +363,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("google-auth", help="authorise Google Calendar").set_defaults(
         func=cmd_google_auth
     )
+    sub.add_parser(
+        "espo-check", help="test the EspoCRM connection and show what is in it"
+    ).set_defaults(func=cmd_espo_check)
+
+    p = sub.add_parser("espo-sync", help="analyse new email in EspoCRM")
+    p.add_argument("--limit", type=int)
+    p.set_defaults(func=cmd_espo_sync)
+
     sub.add_parser(
         "sync-work", help="pull open work orders and winter quotes from the shop apps"
     ).set_defaults(func=cmd_sync_tickets)

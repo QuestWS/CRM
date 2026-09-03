@@ -1,0 +1,9 @@
+.venv/
+.git/
+data/
+media/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.credentials/
+.env

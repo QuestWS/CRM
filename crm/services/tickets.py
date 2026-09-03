@@ -268,9 +268,39 @@ def open_tickets_for(s: Session, contact: Contact | None) -> list[WorkItem]:
     )
 
 
+def tickets_context_block_for_identifiers(s: Session, identifiers: list[str]) -> str:
+    """Open work matched on raw phone numbers and email addresses.
+
+    The EspoCRM path has no local Contact row to hand in - it has whatever
+    addresses Espo holds - so matching goes straight against those.
+    """
+    phones = [p for p in (normalize_phone(i) for i in identifiers) if p]
+    emails = [e for e in (normalize_email(i) for i in identifiers) if e]
+    if not phones and not emails:
+        return ""
+
+    clauses = []
+    if phones:
+        clauses.append(WorkItem.customer_phone.in_(phones))
+    if emails:
+        clauses.append(WorkItem.customer_email.in_(emails))
+
+    items = list(
+        s.scalars(
+            select(WorkItem)
+            .where(WorkItem.is_open.is_(True), or_(*clauses))
+            .order_by(WorkItem.remote_updated_at.desc())
+        )
+    )
+    return _format_open_work(items)
+
+
 def tickets_context_block(s: Session, contact: Contact | None) -> str:
     """The open-tickets list handed to the analyst so it can attribute a call."""
-    tickets = open_tickets_for(s, contact)
+    return _format_open_work(open_tickets_for(s, contact))
+
+
+def _format_open_work(tickets: list[WorkItem]) -> str:
     if not tickets:
         return ""
     lines = [

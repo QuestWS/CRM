@@ -1,14 +1,24 @@
-# AI CRM — calls, email, and remembering people
+# Quest CRM assistant
 
-A CRM for a one-person business that records and transcribes your phone calls,
-reads your inbox and sent mail, and keeps a running profile of every person you
-deal with — what they need, and who they are.
+An AI layer over **EspoCRM** for Quest Watersports. EspoCRM is the system of
+record — contacts, email, tasks, calendar. This service adds the judgement:
+what each conversation was about, what the customer needs, what they told you
+about themselves, and what it changes in the shop's other systems.
+
+It also connects the two apps the shop already runs — the
+[service tracker](https://github.com/QuestWS/servicetracker) and the
+[winter services system](https://github.com/QuestWS/winter-quotes_26-27) — so a
+storage call finds the right quote and a repair call finds the right work order.
 
 Built around one idea: **a good transaction comes from knowing the issue, a good
 customer comes from getting to know the person.** Those are two different things,
-so the system tracks them separately. "Needs" are the job to be done. "Facts" are
-what someone told you about their life. You get both on one page before you call
-them back.
+so they are tracked separately. "Needs" are the job to be done. "Facts" are what
+someone told you about their life. You get both before you call them back.
+
+## Start here
+
+**[docs/espocrm-setup.md](docs/espocrm-setup.md)** — `docker compose up -d`,
+connect the mailbox, make an API user. Twenty minutes.
 
 ## What it does
 

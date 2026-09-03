@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     sangoma_client_id: str = Field("", alias="SANGOMA_CLIENT_ID")
     sangoma_client_secret: str = Field("", alias="SANGOMA_CLIENT_SECRET")
 
+    # --- espocrm (the system of record) ---
+    espo_url: str = Field("", alias="ESPO_URL")
+    espo_api_key: str = Field("", alias="ESPO_API_KEY")
+    espo_sync_minutes: int = Field(5, alias="ESPO_SYNC_MINUTES")
+    espo_backfill_days: int = Field(14, alias="ESPO_BACKFILL_DAYS")
+    espo_max_per_sync: int = Field(50, alias="ESPO_MAX_PER_SYNC")
+    # Notes written back to a contact's stream are shop-side by default.
+    espo_notes_internal: bool = Field(True, alias="ESPO_NOTES_INTERNAL")
+
     # --- email (imap) ---
     imap_host: str = Field("", alias="IMAP_HOST")
     imap_port: int = Field(993, alias="IMAP_PORT")
@@ -166,6 +175,10 @@ class Settings(BaseSettings):
     def business_line_list(self) -> list[str]:
         raw = self.business_lines.replace("\n", ";")
         return [line.strip() for line in raw.split(";") if line.strip()]
+
+    @property
+    def espo_configured(self) -> bool:
+        return bool(self.espo_url and self.espo_api_key)
 
     @property
     def winter_configured(self) -> bool:

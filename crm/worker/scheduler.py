@@ -31,7 +31,9 @@ def job_sync_mail() -> None:
     from crm.ingest.imap_mail import ImapNotConfigured, sync_mail
     from crm.services.pipeline import run_unprocessed_emails
 
-    if not settings.imap_configured:
+    if settings.espo_configured or not settings.imap_configured:
+        # EspoCRM fetches the mailbox itself. Running both would import every
+        # message twice, once into each system.
         return
     try:
         with session_scope() as s:
@@ -77,6 +79,26 @@ def job_walk_in_intakes() -> None:
         log.info("walk-in intake: %s", stats)
 
 
+def job_espo_emails() -> None:
+    """Analyse whatever EspoCRM has fetched since the last pass."""
+    from crm.integrations.espocrm import EspoError, EspoNotConfigured
+    from crm.services.espo_sync import sync_emails
+
+    if not settings.espo_configured:
+        return
+    try:
+        with session_scope() as s:
+            stats = sync_emails(s)
+    except (EspoError, EspoNotConfigured) as exc:
+        log.warning("espo sync skipped: %s", exc)
+        return
+    except Exception:
+        log.exception("espo sync failed")
+        return
+    if stats["analysed"] or stats["failed"]:
+        log.info("espo email sync: %s", stats)
+
+
 def job_sync_work() -> None:
     """Mirror open work from both shop apps. Either being down is survivable."""
     from crm.services.tickets import push_all_pending, sync_all
@@ -113,6 +135,12 @@ def build_scheduler() -> BackgroundScheduler:
         job_process_calls,
         IntervalTrigger(seconds=settings.pipeline_poll_seconds),
         id="process_calls",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_espo_emails,
+        IntervalTrigger(minutes=settings.espo_sync_minutes),
+        id="espo_emails",
         replace_existing=True,
     )
     scheduler.add_job(
