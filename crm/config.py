@@ -69,7 +69,14 @@ class Settings(BaseSettings):
     sangoma_client_id: str = Field("", alias="SANGOMA_CLIENT_ID")
     sangoma_client_secret: str = Field("", alias="SANGOMA_CLIENT_SECRET")
 
-    # --- espocrm (the system of record) ---
+    # --- twenty crm (the system of record) ---
+    twenty_url: str = Field("", alias="TWENTY_URL")
+    twenty_api_key: str = Field("", alias="TWENTY_API_KEY")
+    twenty_sync_minutes: int = Field(5, alias="TWENTY_SYNC_MINUTES")
+    twenty_backfill_days: int = Field(14, alias="TWENTY_BACKFILL_DAYS")
+    twenty_max_per_sync: int = Field(50, alias="TWENTY_MAX_PER_SYNC")
+
+    # --- espocrm (kept for the standalone path; not used with Twenty) ---
     espo_url: str = Field("", alias="ESPO_URL")
     espo_api_key: str = Field("", alias="ESPO_API_KEY")
     espo_sync_minutes: int = Field(5, alias="ESPO_SYNC_MINUTES")
@@ -175,6 +182,10 @@ class Settings(BaseSettings):
     def business_line_list(self) -> list[str]:
         raw = self.business_lines.replace("\n", ";")
         return [line.strip() for line in raw.split(";") if line.strip()]
+
+    @property
+    def twenty_configured(self) -> bool:
+        return bool(self.twenty_url and self.twenty_api_key)
 
     @property
     def espo_configured(self) -> bool:

@@ -1,0 +1,78 @@
+# EspoCRM plus its database, and the CRM assistant that reads from it.
+#
+#   cp .env.example .env      # fill in the secrets first
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# Passwords come from .env and are never committed. See docs/espocrm-setup.md.
+
+services:
+  espocrm-db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${ESPO_DB_ROOT_PASSWORD:?set ESPO_DB_ROOT_PASSWORD in .env}
+      MARIADB_DATABASE: espocrm
+      MARIADB_USER: espocrm
+      MARIADB_PASSWORD: ${ESPO_DB_PASSWORD:?set ESPO_DB_PASSWORD in .env}
+    volumes:
+      - espocrm-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  espocrm:
+    image: espocrm/espocrm:latest
+    restart: unless-stopped
+    depends_on:
+      espocrm-db:
+        condition: service_healthy
+    environment:
+      ESPOCRM_DATABASE_PLATFORM: Mysql
+      ESPOCRM_DATABASE_HOST: espocrm-db
+      ESPOCRM_DATABASE_NAME: espocrm
+      ESPOCRM_DATABASE_USER: espocrm
+      ESPOCRM_DATABASE_PASSWORD: ${ESPO_DB_PASSWORD}
+      ESPOCRM_ADMIN_USERNAME: ${ESPO_ADMIN_USERNAME:-admin}
+      ESPOCRM_ADMIN_PASSWORD: ${ESPO_ADMIN_PASSWORD:?set ESPO_ADMIN_PASSWORD in .env}
+      ESPOCRM_SITE_URL: ${ESPO_SITE_URL:-http://localhost:8080}
+    volumes:
+      - espocrm-data:/var/www/html
+    ports:
+      - "${ESPO_PORT:-8080}:80"
+
+  # Espo's scheduled jobs: fetching IMAP mail, sending queued notifications,
+  # rebuilding streams. Without this container nothing arrives in the CRM.
+  espocrm-daemon:
+    image: espocrm/espocrm:latest
+    restart: unless-stopped
+    depends_on:
+      - espocrm
+    volumes:
+      - espocrm-data:/var/www/html
+    entrypoint: docker-daemon.sh
+
+  # The assistant. Reads what Espo fetched, writes back notes and tasks.
+  assistant:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - espocrm
+    env_file: .env
+    environment:
+      # Inside the compose network Espo is reachable by service name, whatever
+      # ESPO_URL says for your browser.
+      ESPO_URL: http://espocrm
+      DATABASE_URL: sqlite:////data/assistant.db
+      MEDIA_ROOT: /data/media
+    volumes:
+      - assistant-data:/data
+    ports:
+      - "${ASSISTANT_PORT:-8000}:8000"
+
+volumes:
+  espocrm-db:
+  espocrm-data:
+  assistant-data:

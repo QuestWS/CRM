@@ -31,7 +31,7 @@ def job_sync_mail() -> None:
     from crm.ingest.imap_mail import ImapNotConfigured, sync_mail
     from crm.services.pipeline import run_unprocessed_emails
 
-    if settings.espo_configured or not settings.imap_configured:
+    if settings.twenty_configured or settings.espo_configured or not settings.imap_configured:
         # EspoCRM fetches the mailbox itself. Running both would import every
         # message twice, once into each system.
         return
@@ -79,12 +79,32 @@ def job_walk_in_intakes() -> None:
         log.info("walk-in intake: %s", stats)
 
 
+def job_twenty_messages() -> None:
+    """Analyse whatever Twenty has synced from the mailbox since last pass."""
+    from crm.integrations.twenty import TwentyError, TwentyNotConfigured
+    from crm.services.twenty_sync import sync_messages
+
+    if not settings.twenty_configured:
+        return
+    try:
+        with session_scope() as s:
+            stats = sync_messages(s)
+    except (TwentyError, TwentyNotConfigured) as exc:
+        log.warning("twenty sync skipped: %s", exc)
+        return
+    except Exception:
+        log.exception("twenty sync failed")
+        return
+    if stats["analysed"] or stats["failed"]:
+        log.info("twenty message sync: %s", stats)
+
+
 def job_espo_emails() -> None:
     """Analyse whatever EspoCRM has fetched since the last pass."""
     from crm.integrations.espocrm import EspoError, EspoNotConfigured
     from crm.services.espo_sync import sync_emails
 
-    if not settings.espo_configured:
+    if settings.twenty_configured or not settings.espo_configured:
         return
     try:
         with session_scope() as s:
@@ -135,6 +155,12 @@ def build_scheduler() -> BackgroundScheduler:
         job_process_calls,
         IntervalTrigger(seconds=settings.pipeline_poll_seconds),
         id="process_calls",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_twenty_messages,
+        IntervalTrigger(minutes=settings.twenty_sync_minutes),
+        id="twenty_messages",
         replace_existing=True,
     )
     scheduler.add_job(

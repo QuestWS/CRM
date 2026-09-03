@@ -136,6 +136,44 @@ def cmd_check_mail(_args) -> int:
     return 0
 
 
+def cmd_twenty_check(_args) -> int:
+    """Confirm the URL, the key and the workspace in one call."""
+    from crm.integrations.twenty import TwentyError, TwentyNotConfigured
+    from crm.services.twenty_sync import check
+
+    try:
+        with session_scope() as s:
+            info = check(s)
+    except (TwentyError, TwentyNotConfigured) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(f"Connected to {info['url']}")
+    print(f"Workspace: {info['workspace'] or '(unnamed)'}")
+    print(f"Message watermark: {info['watermark']}\n")
+    for obj, state in info["objects"].items():
+        print(f"  {obj:<12} {state}")
+    return 0
+
+
+def cmd_twenty_sync(args) -> int:
+    from crm.integrations.twenty import TwentyError, TwentyNotConfigured
+    from crm.services.twenty_sync import sync_messages
+
+    try:
+        with session_scope() as s:
+            stats = sync_messages(s, limit=args.limit)
+    except (TwentyError, TwentyNotConfigured) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(
+        f"{stats['seen']} message(s) since the watermark: "
+        f"{stats['analysed']} analysed, {stats['skipped']} skipped, "
+        f"{stats['failed']} failed"
+    )
+    return 1 if stats["failed"] and not stats["analysed"] else 0
+
+
 def cmd_espo_check(_args) -> int:
     """Confirm the URL, the key and the API user's access in one call."""
     from crm.integrations.espocrm import EspoError, EspoNotConfigured
@@ -304,6 +342,8 @@ def cmd_doctor(_args) -> int:
          "authorised" if google_ready() else "run: python -m crm.cli google-auth"),
         ("ffmpeg", have_ffmpeg(),
          "found" if have_ffmpeg() else "missing - stereo calls won't be split per speaker"),
+        ("Twenty CRM", settings.twenty_configured,
+         settings.twenty_url or "not connected - set TWENTY_URL and TWENTY_API_KEY"),
         ("EspoCRM", settings.espo_configured,
          settings.espo_url or "not connected - set ESPO_URL and ESPO_API_KEY"),
         ("Service tracker", settings.servicetracker_configured,
@@ -364,7 +404,15 @@ def main(argv: list[str] | None = None) -> int:
         func=cmd_google_auth
     )
     sub.add_parser(
-        "espo-check", help="test the EspoCRM connection and show what is in it"
+        "twenty-check", help="test the Twenty connection and show the workspace"
+    ).set_defaults(func=cmd_twenty_check)
+
+    p = sub.add_parser("twenty-sync", help="analyse new mail Twenty has synced")
+    p.add_argument("--limit", type=int)
+    p.set_defaults(func=cmd_twenty_sync)
+
+    sub.add_parser(
+        "espo-check", help="test the EspoCRM connection (standalone path)"
     ).set_defaults(func=cmd_espo_check)
 
     p = sub.add_parser("espo-sync", help="analyse new email in EspoCRM")

@@ -1,7 +1,8 @@
 # Quest CRM assistant
 
-An AI layer over **EspoCRM** for Quest Watersports. EspoCRM is the system of
-record — contacts, email, tasks, calendar. This service adds the judgement:
+An AI layer over **Twenty CRM** for Quest Watersports. Twenty is the system of
+record — people, companies, the mailbox, notes and tasks. This service adds the
+judgement:
 what each conversation was about, what the customer needs, what they told you
 about themselves, and what it changes in the shop's other systems.
 
@@ -17,11 +18,15 @@ someone told you about their life. You get both before you call them back.
 
 ## Start here
 
-1. **[docs/hosting.md](docs/hosting.md)** — this needs a server, unlike the
-   shop's other two projects. Four options, roughly $0–10/month. Run
-   `tools/host-check.php` on your existing host first; free is free.
-2. **[docs/espocrm-setup.md](docs/espocrm-setup.md)** — connect the mailbox,
-   make an API user. Twenty minutes once you have somewhere to run it.
+1. **[docs/oracle-cloud-setup.md](docs/oracle-cloud-setup.md)** — Oracle Cloud
+   free tier: 4 ARM cores and 24 GB for nothing, plus the three things that
+   will stop you getting there.
+2. **[docs/twenty-setup.md](docs/twenty-setup.md)** — connect
+   `chris@questwatersports.com` over IMAP, make an API key, start the
+   assistant.
+
+Every image in the stack publishes `linux/arm64`, verified against Docker Hub's
+manifests, so it runs on Ampere as-is — no emulation, no source builds.
 
 ## What it does
 

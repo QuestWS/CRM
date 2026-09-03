@@ -1,70 +1,118 @@
-# EspoCRM plus its database, and the CRM assistant that reads from it.
+# Twenty CRM plus the Quest assistant.
 #
-#   cp .env.example .env      # fill in the secrets first
+#   cp .env.example .env      # then fill in the secrets
 #   docker compose up -d
-#   open http://localhost:8080
 #
-# Passwords come from .env and are never committed. See docs/espocrm-setup.md.
+# Every image here publishes linux/arm64, so this runs on Oracle Cloud's
+# always-free Ampere A1 shape as-is. See docs/oracle-cloud-setup.md.
+
+name: quest-crm
 
 services:
-  espocrm-db:
-    image: mariadb:11
-    restart: unless-stopped
+  db:
+    image: postgres:16
+    restart: always
     environment:
-      MARIADB_ROOT_PASSWORD: ${ESPO_DB_ROOT_PASSWORD:?set ESPO_DB_ROOT_PASSWORD in .env}
-      MARIADB_DATABASE: espocrm
-      MARIADB_USER: espocrm
-      MARIADB_PASSWORD: ${ESPO_DB_PASSWORD:?set ESPO_DB_PASSWORD in .env}
+      POSTGRES_USER: ${PG_DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD:?set PG_DATABASE_PASSWORD in .env}
+      POSTGRES_DB: default
     volumes:
-      - espocrm-db:/var/lib/mysql
+      - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ["CMD-SHELL", "pg_isready -U ${PG_DATABASE_USER:-postgres} -d default"]
       interval: 10s
       timeout: 5s
       retries: 12
 
-  espocrm:
-    image: espocrm/espocrm:latest
-    restart: unless-stopped
+  redis:
+    image: redis:7
+    restart: always
+    # Twenty uses Redis as its job queue, so losing it loses queued work
+    # rather than just a cache.
+    command: ["redis-server", "--maxmemory-policy", "noeviction", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  server:
+    image: twentycrm/twenty:${TWENTY_TAG:-latest}
+    restart: always
     depends_on:
-      espocrm-db:
+      db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
-      ESPOCRM_DATABASE_PLATFORM: Mysql
-      ESPOCRM_DATABASE_HOST: espocrm-db
-      ESPOCRM_DATABASE_NAME: espocrm
-      ESPOCRM_DATABASE_USER: espocrm
-      ESPOCRM_DATABASE_PASSWORD: ${ESPO_DB_PASSWORD}
-      ESPOCRM_ADMIN_USERNAME: ${ESPO_ADMIN_USERNAME:-admin}
-      ESPOCRM_ADMIN_PASSWORD: ${ESPO_ADMIN_PASSWORD:?set ESPO_ADMIN_PASSWORD in .env}
-      ESPOCRM_SITE_URL: ${ESPO_SITE_URL:-http://localhost:8080}
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD}@db:5432/default
+      REDIS_URL: redis://redis:6379
+      SERVER_URL: ${SERVER_URL:?set SERVER_URL — Twenty builds links from it}
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
+      # Mailbox passwords are encrypted with this. Lose it and every connected
+      # account has to be reconnected by hand.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      STORAGE_TYPE: local
+      # IMAP / SMTP / CalDAV. On by default upstream; set explicitly so an
+      # upstream default flip cannot quietly disconnect the mailbox.
+      IS_IMAP_SMTP_CALDAV_ENABLED: "true"
+      IS_IMAP_SMTP_CALDAV_CONNECTION_TEST_ENABLED: "true"
+      # Transactional mail Twenty sends itself (invites, password resets).
+      EMAIL_DRIVER: ${EMAIL_DRIVER:-smtp}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-465}
+      EMAIL_SMTP_USER: ${EMAIL_SMTP_USER:-}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Quest Watersports}
     volumes:
-      - espocrm-data:/var/www/html
+      - server-local-data:/app/packages/twenty-server/.local-storage
     ports:
-      - "${ESPO_PORT:-8080}:80"
+      - "${TWENTY_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:3000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
-  # Espo's scheduled jobs: fetching IMAP mail, sending queued notifications,
-  # rebuilding streams. Without this container nothing arrives in the CRM.
-  espocrm-daemon:
-    image: espocrm/espocrm:latest
-    restart: unless-stopped
+  # Twenty's background jobs: fetching IMAP mail, matching participants to
+  # people, running workflows. Without this the mailbox never syncs and
+  # nothing looks broken.
+  worker:
+    image: twentycrm/twenty:${TWENTY_TAG:-latest}
+    restart: always
+    command: ["yarn", "worker:prod"]
     depends_on:
-      - espocrm
+      server:
+        condition: service_healthy
+    environment:
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD}@db:5432/default
+      REDIS_URL: redis://redis:6379
+      SERVER_URL: ${SERVER_URL}
+      APP_SECRET: ${APP_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      STORAGE_TYPE: local
+      IS_IMAP_SMTP_CALDAV_ENABLED: "true"
+      DISABLE_DB_MIGRATIONS: "true"          # the server already ran them
+      DISABLE_CRON_JOBS_REGISTRATION: "true" # and registered the crons
     volumes:
-      - espocrm-data:/var/www/html
-    entrypoint: docker-daemon.sh
+      - server-local-data:/app/packages/twenty-server/.local-storage
 
-  # The assistant. Reads what Espo fetched, writes back notes and tasks.
+  # The assistant: reads what Twenty synced, writes back notes and tasks.
   assistant:
     build: .
-    restart: unless-stopped
+    restart: always
     depends_on:
-      - espocrm
+      server:
+        condition: service_healthy
     env_file: .env
     environment:
-      # Inside the compose network Espo is reachable by service name, whatever
-      # ESPO_URL says for your browser.
-      ESPO_URL: http://espocrm
+      # Inside the compose network Twenty is reachable by service name,
+      # whatever SERVER_URL says for your browser.
+      TWENTY_URL: http://server:3000
       DATABASE_URL: sqlite:////data/assistant.db
       MEDIA_ROOT: /data/media
     volumes:
@@ -73,6 +121,7 @@ services:
       - "${ASSISTANT_PORT:-8000}:8000"
 
 volumes:
-  espocrm-db:
-  espocrm-data:
+  db-data:
+  redis-data:
+  server-local-data:
   assistant-data:
