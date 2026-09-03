@@ -1,5 +1,9 @@
 # Standing up EspoCRM
 
+> **Need somewhere to run it first?** [hosting.md](hosting.md) covers the four
+> options and how to check whether your existing web host will do. This page
+> assumes you have a box.
+
 EspoCRM is the system of record: contacts, email, tasks, calendar, cases. This
 service is a sidecar that reads what Espo fetched, runs the analysis, and
 writes back. Espo does the CRM; this does the judgement.

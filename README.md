@@ -17,8 +17,11 @@ someone told you about their life. You get both before you call them back.
 
 ## Start here
 
-**[docs/espocrm-setup.md](docs/espocrm-setup.md)** — `docker compose up -d`,
-connect the mailbox, make an API user. Twenty minutes.
+1. **[docs/hosting.md](docs/hosting.md)** — this needs a server, unlike the
+   shop's other two projects. Four options, roughly $0–10/month. Run
+   `tools/host-check.php` on your existing host first; free is free.
+2. **[docs/espocrm-setup.md](docs/espocrm-setup.md)** — connect the mailbox,
+   make an API user. Twenty minutes once you have somewhere to run it.
 
 ## What it does
 
