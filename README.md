@@ -18,6 +18,10 @@ someone told you about their life. You get both before you call them back.
 
 ## Start here
 
+**New to servers?** [docs/orientation-prompt.md](docs/orientation-prompt.md) is
+a prompt to paste into Claude chat that will teach you what this stack is and
+what you are taking on, before you build any of it.
+
 1. **[docs/oracle-cloud-setup.md](docs/oracle-cloud-setup.md)** — Oracle Cloud
    free tier: 4 ARM cores and 24 GB for nothing, plus the three things that
    will stop you getting there.
